@@ -11,6 +11,7 @@ import bpy, mathutils
 import os, struct
 import os.path as path
 import glob #for headlights
+import re
 
 import pkgimporter.common_helpers as helper
 import pkgimporter.binary_helper as bin

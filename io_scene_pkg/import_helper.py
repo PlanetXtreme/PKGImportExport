@@ -233,33 +233,50 @@ def populate_material(mtl=None, shader=None, pkg_path="", use_roughness_instead=
 
 def import_headlight_objs(filepath):
     """
-    Finds and imports all *_HLIGHTGLOW*.mtx files in the same directory as the given filepath.
-    Reconstructs them as plane objects in Blender.
+    Finds and imports HEADLIGHT / HLIGHT .mtx files that strictly match the 
+    base name of the given filepath. Reconstructs them as plane objects in Blender.
     """
-    # 1. Get the directory from the provided .pkg filepath
+
+    # "dir/geometry/example.pkg" -> directory: "dir/geometry", base_name: "example"
     directory = os.path.dirname(filepath)
+    if not directory:
+        directory = "."  # fallback to current directory if only a filename is passed
+        
+    filename = os.path.basename(filepath)
+    base_name = os.path.splitext(filename)[0]
     
-    # 2. Search for any MTX file matching the headlight naming convention
-    search_pattern = os.path.join(directory, "*_HLIGHTGLOW*.mtx")
-    mtx_files = glob.glob(search_pattern)
+    pattern_str = r"^" + re.escape(base_name) + r"_?(HEADLIGHT|HLIGHT)\d*\.mtx$"
+    regex = re.compile(pattern_str, re.IGNORECASE)
+    
+    # Search for perfectly matching MTX files
+    mtx_files =[]
+    if os.path.exists(directory):
+        for f in os.listdir(directory):
+            if regex.match(f):
+                mtx_files.append(os.path.join(directory, f))
     
     if not mtx_files:
-        print(f"Notice: No HLIGHTGLOW mtx files found in {directory}")
+        print(f"Notice: No matching HEADLIGHT/HLIGHT mtx files found for '{base_name}' in {directory}")
         return
         
     for mtx_path in mtx_files:
-        # Get the filename to name our Blender object (e.g., "example_HLIGHTGLOW0")
-        filename = os.path.basename(mtx_path)
-        obj_name = os.path.splitext(filename)[0]
-        if "HLIGHTGLOW" in obj_name: #changes exported name
-            start_index = obj_name.find("HLIGHTGLOW")
+        # Get the filename to name our Blender object
+        file_base = os.path.basename(mtx_path)
+        obj_name = os.path.splitext(file_base)[0]
+        
+        # Strip the "example_" prefix to make the object name clean in Blender
+        if "HEADLIGHT" in obj_name.upper():
+            start_index = obj_name.upper().find("HEADLIGHT")
+            obj_name = obj_name[start_index:]
+        elif "HLIGHT" in obj_name.upper():
+            start_index = obj_name.upper().find("HLIGHT")
             obj_name = obj_name[start_index:]
 
         with open(mtx_path, 'rb') as f:
             # The export script packs exactly 9 floats (36 bytes) followed by padding
             float_data = f.read(36)
             if len(float_data) < 36:
-                print(f"Warning: Skipping {filename}, file is too small.")
+                print(f"Warning: Skipping {file_base}, file is too small.")
                 continue
                 
             # Unpack the Game Space floats (Little Endian '<9f')
@@ -275,18 +292,18 @@ def import_headlight_objs(filepath):
         b_minZ, b_maxZ = g_minY, g_maxY
         
         # Craft the Headlight Object (Quad / Plane)
-        verts = [
+        verts =[
             (b_minX, b_minY, b_minZ), # Bottom-Left
             (b_maxX, b_minY, b_minZ), # Bottom-Right
             (b_maxX, b_maxY, b_maxZ), # Top-Right
             (b_minX, b_maxY, b_maxZ), # Top-Left
         ]
         
-        faces = [(0, 1, 2, 3)]
+        faces =[(0, 1, 2, 3)]
         
         # Create Blender mesh and object
         mesh = bpy.data.meshes.new(name=obj_name)
-        mesh.from_pydata(verts, [], faces)
+        mesh.from_pydata(verts,[], faces)
         mesh.update()
         
         obj = bpy.data.objects.new(obj_name, mesh)

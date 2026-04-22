@@ -1,27 +1,20 @@
-Blender PKG Add-On
-Version 1.02
-March 11th 2022
+Blender PKG Add-On for Midnight Club Street Racing
+Version 1.03
+April 22nd 2026
 
-Created by Dummiesman
+Originally created by Dummiesman (edited by Planet Xtreme)
 
-1.Requirements
-  The addon was created in Blender 2.83, and may not work in previous verions.
-  The addon was tested and appears to work in 2.9+ as well
+Requirements
+  Download + Install Blender 5.0+ (tested in 5.1)
+  Download io_scene_pkg as zip
+  Either:
+    unzip file and place in AppData\Roaming\Blender Foundation\Blender\5.1\scripts\addons\pkgimporter
+  or:
+    install zip file via Blender -> Edit -> Preferences -> Add-ons -> Install from Disk... -> select zip
 
-2.Installation
-  - Open the Blender preferences menu, found under Edit->Preferences.
-
-  - Go to the add-ons tab.
-
-  - Click the install button located on the top right corner.
-
-  - Select the downloaded addon ZIP
-  
-  - Enable it, and enter your game data path
-
-3.Importing
+Importing
   Textures
-    Textures with the format BMP,TGA,TEX will be imported.
+    Textures with the format BMP,TGA,TEX will be imported when importing .pkg files
 
   MTX Files
     MTX files will automatically be imported if found
@@ -29,12 +22,15 @@ Created by Dummiesman
   Geometry Flags
     Because geometry flags are done via geometry, and not via material. These are NOT imported.
 
-4.Exporting
+Exporting
   Reflections
-    To change the "Shininess" of a material, change the "Specular" property.
+    To change the "Shininess" of a material, change the "Roughness" or "Specular -> IOR Level"  property, and select apropriate settings when exporting.
 
   Geometry Flags
-    Using the Emissive material type will export any geometry with that material as shadeless in game
+    Using the Emissive material type will export any geometry with that material as shadeless in-game
+
+  Materials Extra
+    If you want a solid color material, use a Principled BSDF and set the base color. This can make texturing solid colors (like the bottom of cars) easier.
 
   Textures
     The exporter will try and find the texture by searching the node tree. If it can't find the texture, or it's otherwise not assigned, the material will export untextured.
@@ -44,26 +40,22 @@ Created by Dummiesman
 
   Paintjobs (Variants)
     Press the N key to bring up the sidebar. You should see a tab called "Angel Tools"
-    
-    Here you can create and edit paintjobs (variants). 
+    Here you can create and edit paintjobs (variants). This ONLY APPLIES to Midtown Madness, and not MCSR.
     
   MTX Files
-    MTX files will be created if the location of an object is not 0,0,0. Objects do not need the :m suffix. Adding the :m suffix will crash the game, because it will be exported with that name into the PKG file.
-
-  Export Type
-    Export type (Dashboard, Trailer, Prop) will be automatically determined. And all types of objects such as city props, buildings, etc should work automatically
+    MTX files will be created for apropriately named objects. Import a similar vehicle to visualize naming schemes (For example, to see Siren naming schemes, import a police car).
 
   Transparency
-    Transparency is done using Blenders native system. Make sure your "Blend Mode" property is set to something other than "Opaque" if you want that material to be transparent in-game.
+    Transparency is done using Blender's Alpha Transparency node for a Principled BSDF.
+    To make windows:
+      Create a Principled BSDF material. If the alpha input node is a percentage and not 0.000, changing the base color of the principled BSDF will get colored windows (import the Piranha PDQ ARi [vp_crxclassc] to see an example of properly tinted windows).
+    To make isCarColorable:
+      Plug in a texture with an alpha channel (fully transparent can also work). For all transparent data which matches the object's UVs, in Midnight Club Street Racing that element becomes colorable. Setting the default value for isCarColorable requires editing the pnach file, though.
 
   Vertex Colors
-    You can export vertex colors via the checkbox in the export dialog
-    
-5.FAQ
-  Q:I imported my PKG file, I have my textures in the right format, but I don't see them in Blender!?
-    A:You have to be in Material render mode, rather than Solid. 
+    You can export vertex colors via the checkbox in the export dialog (may not work with MCSR)
 
-6.Special Thanks
+Special Thanks
   RacingFreak : Providing a Midnight Club sample file leading to some new discoveries
   Deebz__ : Testing (lots of it), ideas and suggestions
   Fireboyd78 : Suggestions for code improvement

@@ -1,17 +1,13 @@
-# ##### BEGIN LICENSE BLOCK #####
-#
 # This program is licensed under Creative Commons BY-NC-SA:
 # https://creativecommons.org/licenses/by-nc-sa/3.0/
 #
-# Created by Dummiesman, 2016-2020
-#
-# ##### END LICENSE BLOCK #####
+# Created by Dummiesman, 2016-2020, edited in 2026, {ADD YEARS HERE}
 
 bl_info = {
     "name": "Angel Studios PKG Format",
-    "author": "Dummiesman",
-    "version": (1, 0, 0),
-    "blender": (2, 83, 0),
+    "author": "Dummiesman, other", #edited for Blender 5.0 + MCSR compatibility by Planet Xtreme but he doesn't deserve credit, does he
+    "version": (1, 0, 1),
+    "blender": (5, 1, 0),
     "location": "File > Import-Export",
     "description": "Import-Export PKG files",
     "warning": "",
@@ -21,12 +17,37 @@ bl_info = {
     "category": "Import-Export"}
 
 import bpy
-import io_scene_pkg.variant_ui as variant_ui
-import io_scene_pkg.angel_scenedata as angel_scenedata
-import io_scene_pkg.bl_preferences as bl_preferences
-import io_scene_pkg.import_tex as import_tex
-import io_scene_pkg.material_helper_ui as material_helper_ui
+import pkgimporter.variant_ui as variant_ui
+import pkgimporter.angel_scenedata as angel_scenedata
+import pkgimporter.bl_preferences as bl_preferences
+import pkgimporter.import_tex as import_tex
+import pkgimporter.material_helper_ui as material_helper_ui
+import json #for saved export/import settings :)
+import os
 
+CONFIG_FILE = os.path.join(os.path.dirname(__file__), "pkg_addon_settings.json")
+
+def load_settings():
+    """Load settings from JSON file, return empty dict if it fails/doesn't exist."""
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Failed to load PKG settings: {e}")
+    return {}
+
+def save_settings(new_settings):
+    """Update and save settings to the JSON file."""
+    settings = load_settings()
+    settings.update(new_settings)
+    try:
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(settings, f, indent=4)
+    except Exception as e:
+        print(f"Failed to save PKG settings: {e}")
+
+user_settings = load_settings()
 
 from bpy.props import (
         BoolProperty,
@@ -52,12 +73,38 @@ class ImportPKG(bpy.types.Operator, ImportHelper):
     filter_glob: StringProperty(default="*.pkg", options={'HIDDEN'})
 
     import_variants: BoolProperty(
-        name="Import Variants",
-        description="Import variants from this file. Will clear existing variant data in the scene.",
-        default=True,
+        name="Import LOD Variants",
+        description="Import variants from the selected file.",
+        default=user_settings.get("import_variants", True),
         )
-        
+
+    import_bbnd: BoolProperty(
+        name="Import bbnd/bnd",
+        description="Import boundary box object in ../bound as mesh",
+        default=user_settings.get("import_bbnd", True),
+        )
+
+    import_headlights: BoolProperty(
+        name="Import headlights",
+        description="If headlight MTX file(s) are found (...HLIGHTGLOW0, ...HLIGHTGLOW1.mtx), import it as geometry",
+        default=user_settings.get("import_headlights", True),
+        )    
+
+    use_roughness_instead_of_specular_two: BoolProperty(
+        name="Import Materials using roughness for shininess",
+        description="Reccomended to select this; If unselected, 'Specular ⌄ IOR Level' (original, outdated functionality) will determine shininess.",
+        default=user_settings.get("use_roughness_instead_of_specular_two", True),
+        )
+
     def execute(self, context):
+
+        save_settings({
+            "import_variants": self.import_variants,
+            "import_bbnd": self.import_bbnd,
+            "use_roughness_instead_of_specular_two": self.use_roughness_instead_of_specular_two,
+            "import_headlights": self.import_headlights,
+        })
+
         from . import import_pkg
         keywords = self.as_keywords(ignore=("axis_forward",
                                             "axis_up",
@@ -67,6 +114,19 @@ class ImportPKG(bpy.types.Operator, ImportHelper):
 
         return import_pkg.load(self, context, **keywords)
 
+class ImportBBND(bpy.types.Operator, ImportHelper):
+    """Import the bbnd file format (.bbnd)"""
+    bl_idname = "import_scene.bbnd"
+    bl_label = 'Import BBND'
+    bl_options = {'UNDO'}
+
+    filename_ext = ".bbnd"
+    filter_glob: StringProperty(default="*.bbnd;*.bnd", options={'HIDDEN'},)
+        
+    def execute(self, context):
+        from . import import_bbnd
+
+        return import_bbnd.runs(self, context)
 
 class ExportPKG(bpy.types.Operator, ExportHelper):
     """Export to PKG file format (.PKG)"""
@@ -79,31 +139,60 @@ class ExportPKG(bpy.types.Operator, ExportHelper):
             options={'HIDDEN'},
             )
 
+    export_bbnd_file: BoolProperty(
+        name="Export bbnd (BOUND) file too",
+        description="If 'BOUND'-named object is selected, export it too (to ../bound folder)",
+        default=user_settings.get("export_bbnd_file", True),
+        )    
+    
+    export_headlights: BoolProperty(
+        name="Export headlights",
+        description="If geometry is named HLIGHT/HEADLIGHT, and geometry is apropriate (2 tris/headlight or 1 plane per headlight), export applicable MTX file",
+        default=user_settings.get("export_headlights", True),
+        )    
+    
+    use_roughness_instead_of_specular_one: BoolProperty(
+        name="Export Materials using roughness for shininess",
+        description="Reccomended to select this; If unselected, 'Specular ⌄ IOR Level' (original, outdated functionality) will determine shininess.",
+        default=user_settings.get("use_roughness_instead_of_specular_one", True),
+        )
+
     e_vertexcolors: BoolProperty(
         name="Vertex Colors (Diffuse)",
-        description="Export vertex colors that affect diffuse",
-        default=False,
+        description="Export vertex colors that might affect diffuse",
+        default=user_settings.get("e_vertexcolors", False),
         )
         
     e_vertexcolors_s: BoolProperty(
         name="Vertex Colors (Specular)",
-        description="Export vertex colors that affect specular",
-        default=False,
+        description="Export vertex colors that might affect specular",
+        default=user_settings.get("e_vertexcolors_s", False),
         )
         
     apply_modifiers: BoolProperty(
         name="Apply Modifiers",
-        description="Do you desire modifiers to be applied in the PKG?",
-        default=True,
+        description="(Temporarily) apply Blender modifiers to objects before exporting to the pkg?",
+        default=user_settings.get("apply_modifiers", True),
         )
         
-    selection_only: BoolProperty(
-        name="Selection Only",
-        description="Export only selected elements",
-        default=False,
-        )
+    #selection_only: BoolProperty(
+    #    name="Selection Only",
+    #    description="This is enabled whether you select it or not",
+    #    default=True,
+    #    )
         
     def execute(self, context):
+
+        save_settings({
+            "export_bbnd_file": self.export_bbnd_file,
+            "use_roughness_instead_of_specular_one": self.use_roughness_instead_of_specular_one,
+            "e_vertexcolors": self.e_vertexcolors,
+            "e_vertexcolors_s": self.e_vertexcolors_s,
+            "apply_modifiers": self.apply_modifiers,
+            "apply_modifiers": self.apply_modifiers,
+            "export_headlights": self.export_headlights,
+        })
+
         from . import export_pkg
         
         keywords = self.as_keywords(ignore=("axis_forward",
@@ -114,19 +203,35 @@ class ExportPKG(bpy.types.Operator, ExportHelper):
                                     
         return export_pkg.save(self, context, **keywords)
 
+class ExportBBND(bpy.types.Operator, ExportHelper):
+    """Export to bbnd file format (.bbnd)"""
+    bl_idname = "export_scene.bbnd"
+    bl_label = 'Export BBND'
 
-# Add to a menu
+    filename_ext = ".bbnd"
+    filter_glob: StringProperty(default="*.bbnd;*.bnd", options={'HIDDEN'},)
+        
+    def execute(self, context):
+        from . import export_bbnd
+                                    
+        return export_bbnd.save(self, context)
+
+
+# Adds to menu
 def menu_func_export(self, context):
-    self.layout.operator(ExportPKG.bl_idname, text="Angel Studios ModPackage (.pkg)")
-
+    self.layout.operator(ExportPKG.bl_idname,  text="Angel Studios ModPackage  (.pkg)")
+    self.layout.operator(ExportBBND.bl_idname, text="Angel Studios BoxBoundary (.bbnd)")
 
 def menu_func_import(self, context):
-    self.layout.operator(ImportPKG.bl_idname, text="Angel Studios ModPackage (.pkg)")
+    self.layout.operator(ImportPKG.bl_idname,  text="Angel Studios ModPackage  (.pkg)")
+    self.layout.operator(ImportBBND.bl_idname, text="Angel Studios BoxBoundary (.bbnd)")
 
 # Register factories
 classes = (
     ImportPKG,
-    ExportPKG
+    ImportBBND,
+    ExportPKG,
+    ExportBBND,
 )
 
 def register():

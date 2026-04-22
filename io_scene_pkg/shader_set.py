@@ -7,7 +7,7 @@
 #
 # ##### END LICENSE BLOCK #####
 
-import io_scene_pkg.binary_helper as bin
+import pkgimporter.binary_helper as bin
 import struct
 
 class Shader:

@@ -10,7 +10,7 @@
 import bpy
 import textwrap 
 import os.path as path
-import io_scene_pkg.common_helpers as helper
+import pkgimporter.common_helpers as helper
 
 from bpy.types import (Panel,
                        Menu,

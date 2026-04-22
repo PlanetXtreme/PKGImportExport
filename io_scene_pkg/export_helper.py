@@ -10,9 +10,9 @@
 import bpy, bmesh
 import struct
 
-from io_scene_pkg.shader_set import (ShaderSet, Shader)
-import io_scene_pkg.common_helpers as helper
-import io_scene_pkg.binary_helper as bin
+from pkgimporter.shader_set import (ShaderSet, Shader)
+import pkgimporter.common_helpers as helper
+import pkgimporter.binary_helper as bin
 
 def is_mat_shadeless(mat):
     for node in mat.node_tree.nodes:
@@ -20,7 +20,7 @@ def is_mat_shadeless(mat):
             return True
     return False
             
-def create_shader_from_material(mat):
+def create_shader_from_material(mat, use_roughness_instead_of_specular_one):
     # get principled node
     root_node = None
     for node in mat.node_tree.nodes:
@@ -43,7 +43,7 @@ def create_shader_from_material(mat):
             # we directly have a (hopefully multiply) MIX_RGB input
             for inp in color_input_node.inputs:
                 # search for color
-                if len(inp.links) == 0 and inp.name != "Fac":
+                if len(inp.links) == 0 and inp.name != "Factor":
                     shader.diffuse_color = [inp.default_value[0], inp.default_value[1], inp.default_value[2], 1.0]
                 # search for image name
                 if len(inp.links) == 1:
@@ -69,7 +69,7 @@ def create_shader_from_material(mat):
                 # we do range(2) here because there's a 3rd input we want to totally ignore
                 for inp_id in range(2):
                     inp = math_node.inputs[inp_id]
-                    if len(inp.links) == 0 and inp.name != "Fac":
+                    if len(inp.links) == 0 and inp.name != "Factor":
                         shader.diffuse_color[3] = inp.default_value
             else:
                 print("Unsupported alpha link type. Using default value for diffuse_color.")
@@ -78,12 +78,12 @@ def create_shader_from_material(mat):
     
     # assign emission
     if root_node.type == "BSDF_PRINCIPLED":
-        emission_input = root_node.inputs["Emission"]
+        emission_input = root_node.inputs["Emission Color"]
         if len(emission_input.links) > 0:
             mix_node = emission_input.links[0].from_node
             if mix_node.type == "MIX_RGB":
                 for inp in mix_node.inputs:
-                    if len(inp.links) == 0 and inp.name != "Fac":
+                    if len(inp.links) == 0 and inp.name != "Factor":
                         shader.emissive_color = [inp.default_value[0], inp.default_value[1], inp.default_value[2], 1.0]
             else:
                 print("Unsupported diffuse link type. Using default value for diffuse_color.")
@@ -95,7 +95,11 @@ def create_shader_from_material(mat):
         shader.diffuse_color[3] = 1.0
         
     # assign shininess
-    shader.shininess = root_node.inputs["Specular"].default_value
+    if use_roughness_instead_of_specular_one is True:
+        raw_roughness = root_node.inputs["Roughness"].default_value
+        shader.shininess = min(max(1.0 - raw_roughness, 0.0), 1.0)
+    else:
+        shader.shininess = root_node.inputs["Specular IOR Level"].default_value
 
     # copy diffuse
     shader.ambient_color = shader.diffuse_color 
@@ -141,9 +145,13 @@ def get_used_materials(ob, modifiers):
     
     return used_materials
 
+
+###fixed the below func to use materials on selected objects only
 def create_material_remap(modifiers):
     all_used_mats = []
-    for ob in bpy.context.scene.objects:
+    
+    # CHANGED: Now we only loop through selected objects instead of the whole scene
+    for ob in bpy.context.selected_objects:
         if ob.type != 'MESH':
             continue
         
@@ -193,7 +201,7 @@ def write_matrix_standard(object, file):
                                            
 def write_matrix(meshname, object, pkg_path):
     """write a *.mtx file"""
-    mesh_name_parsed = helper.get_raw_object_name(meshname)
+    mesh_name_parsed = helper.get_clean_name(helper.get_raw_object_name(meshname))
     mtx_path = pkg_path[:-4] + '_' + mesh_name_parsed + ".mtx"
 
     mtxfile = open(mtx_path, 'wb')

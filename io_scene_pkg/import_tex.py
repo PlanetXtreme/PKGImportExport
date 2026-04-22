@@ -33,7 +33,7 @@ class ImportTEX(bpy.types.Operator, ImportHelper):
     filter_glob: StringProperty(default="*.tex", options={'HIDDEN'})
 
     def execute(self, context):
-        from io_scene_pkg.tex_file import TEXFile
+        from pkgimporter.tex_file import TEXFile
         keywords = self.as_keywords(ignore=("axis_forward",
                                             "axis_up",
                                             "filter_glob",

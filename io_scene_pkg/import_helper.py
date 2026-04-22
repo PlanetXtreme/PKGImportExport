@@ -10,9 +10,10 @@
 import bpy, mathutils
 import os, struct
 import os.path as path
+import glob #for headlights
 
-import io_scene_pkg.common_helpers as helper
-import io_scene_pkg.binary_helper as bin
+import pkgimporter.common_helpers as helper
+import pkgimporter.binary_helper as bin
                        
 #######################
 ### Other Functions ###
@@ -56,7 +57,6 @@ def find_matrix(meshname, pkg_path):
         
         return (True, mtx_min, mtx_max, pivot, origin)
     return (False, None, None, None, None)
- 
  
 def check_degenerate(i1, i2, i3):
     if i1 == i2 or i1 == i3 or i2 == i3:
@@ -125,8 +125,9 @@ def read_vertex_data(file, FVF_FLAGS, compressed):
           
     return (vnorm, vuv, vcolor)
 
-def populate_material(mtl, shader, pkg_path):
+def populate_material(mtl=None, shader=None, pkg_path="", use_roughness_instead=True):
     """ Initializes a material """
+    print(f"use_roughness_instead_of_specular is {use_roughness_instead}")
     # get addon settings
     preferences = bpy.context.preferences
     addon_prefs = preferences.addons[__package__].preferences    
@@ -141,9 +142,18 @@ def populate_material(mtl, shader, pkg_path):
     # setup colors
     bsdf = mtl.node_tree.nodes["Principled BSDF"]
     bsdf.inputs['Base Color'].default_value = shader.diffuse_color
-    bsdf.inputs['Emission'].default_value = shader.emissive_color
-    bsdf.inputs['Specular'].default_value = shader.shininess
-    bsdf.inputs['Roughness'].default_value = 0
+    bsdf.inputs['Emission Color'].default_value = shader.emissive_color
+
+    if use_roughness_instead:
+        # Invert shininess back to roughness (Shininess 1.0 -> Roughness 0.0)
+        roughness_val = min(max(1.0 - shader.shininess, 0.0), 1.0)
+        
+        bsdf.inputs['Roughness'].default_value = roughness_val
+        bsdf.inputs['Specular IOR Level'].default_value = 0.5 
+    else:
+        # Original functionality
+        bsdf.inputs['Specular IOR Level'].default_value = shader.shininess
+        bsdf.inputs['Roughness'].default_value = 0.0
 
     mtl.diffuse_color = shader.diffuse_color
     mtl.specular_intensity = 0.1
@@ -174,7 +184,7 @@ def populate_material(mtl, shader, pkg_path):
         tex_depth = tex_result.depth
         tex_image_node = mtl.node_tree.nodes.new('ShaderNodeTexImage')
         tex_image_node.image = tex_result
-        tex_image_node.location = mathutils.Vector((-640.0, 20.0))
+        tex_image_node.location = mathutils.Vector((-740.0, 20.0))
         
         # the substitution texture is very low res. Don't filter it.
         if is_substituted_tex:
@@ -185,7 +195,7 @@ def populate_material(mtl, shader, pkg_path):
         blend_node.inputs['Fac'].default_value = 1.0
         blend_node.blend_type = 'MULTIPLY'
         blend_node.label = "Diffuse Color"
-        blend_node.location = mathutils.Vector((-260.0, 160.0))
+        blend_node.location = mathutils.Vector((-460.0, 160.0))
         
         mtl.node_tree.links.new(blend_node.inputs['Color1'], tex_image_node.outputs['Color'])
         mtl.node_tree.links.new(bsdf.inputs['Base Color'], blend_node.outputs['Color'])
@@ -197,10 +207,10 @@ def populate_material(mtl, shader, pkg_path):
         blend_node.inputs['Fac'].default_value = 1.0
         blend_node.blend_type = 'MULTIPLY'
         blend_node.label = "Emission Color"
-        blend_node.location = mathutils.Vector((-260.0, -20.0))
+        blend_node.location = mathutils.Vector((-460.0, -20.0))
         
         mtl.node_tree.links.new(blend_node.inputs['Color1'], tex_image_node.outputs['Color'])
-        mtl.node_tree.links.new(bsdf.inputs['Emission'], blend_node.outputs['Color'])
+        mtl.node_tree.links.new(bsdf.inputs['Emission Color'], blend_node.outputs['Color'])
      
     # have alpha?
     if mtl_alpha < 1 or tex_depth == 32:
@@ -212,7 +222,7 @@ def populate_material(mtl, shader, pkg_path):
         blend_node.inputs[0].default_value = mtl_alpha
         blend_node.operation = 'MULTIPLY'
         blend_node.label = "Alpha"
-        blend_node.location = mathutils.Vector((-260.0, -200.0))
+        blend_node.location = mathutils.Vector((-460.0, -200.0))
         
         mtl.node_tree.links.new(blend_node.inputs[1], tex_image_node.outputs['Alpha'])
         mtl.node_tree.links.new(bsdf.inputs['Alpha'], blend_node.outputs[0])
@@ -221,4 +231,65 @@ def populate_material(mtl, shader, pkg_path):
         
     mtl.name = texture_name
 
+def import_headlight_objs(filepath):
+    """
+    Finds and imports all *_HLIGHTGLOW*.mtx files in the same directory as the given filepath.
+    Reconstructs them as plane objects in Blender.
+    """
+    # 1. Get the directory from the provided .pkg filepath
+    directory = os.path.dirname(filepath)
+    
+    # 2. Search for any MTX file matching the headlight naming convention
+    search_pattern = os.path.join(directory, "*_HLIGHTGLOW*.mtx")
+    mtx_files = glob.glob(search_pattern)
+    
+    if not mtx_files:
+        print(f"Notice: No HLIGHTGLOW mtx files found in {directory}")
+        return
         
+    for mtx_path in mtx_files:
+        # Get the filename to name our Blender object (e.g., "example_HLIGHTGLOW0")
+        filename = os.path.basename(mtx_path)
+        obj_name = os.path.splitext(filename)[0]
+        if "HLIGHTGLOW" in obj_name: #changes exported name
+            start_index = obj_name.find("HLIGHTGLOW")
+            obj_name = obj_name[start_index:]
+
+        with open(mtx_path, 'rb') as f:
+            # The export script packs exactly 9 floats (36 bytes) followed by padding
+            float_data = f.read(36)
+            if len(float_data) < 36:
+                print(f"Warning: Skipping {filename}, file is too small.")
+                continue
+                
+            # Unpack the Game Space floats (Little Endian '<9f')
+            (g_minX, g_minY, g_minZ, 
+             g_maxX, g_maxY, g_maxZ, 
+             g_centerX, g_centerY, g_centerZ) = struct.unpack('<9f', float_data)
+             
+        # Convert Game Space back to Blender Space
+        # Export did: Game_X = Blen_X | Game_Y = Blen_Z | Game_Z = Blen_Y
+        # So Import:  Blen_X = Game_X | Blen_Y = Game_Z | Blen_Z = Game_Y
+        b_minX, b_maxX = g_minX, g_maxX
+        b_minY, b_maxY = g_minZ, g_maxZ
+        b_minZ, b_maxZ = g_minY, g_maxY
+        
+        # Craft the Headlight Object (Quad / Plane)
+        verts = [
+            (b_minX, b_minY, b_minZ), # Bottom-Left
+            (b_maxX, b_minY, b_minZ), # Bottom-Right
+            (b_maxX, b_maxY, b_maxZ), # Top-Right
+            (b_minX, b_maxY, b_maxZ), # Top-Left
+        ]
+        
+        faces = [(0, 1, 2, 3)]
+        
+        # Create Blender mesh and object
+        mesh = bpy.data.meshes.new(name=obj_name)
+        mesh.from_pydata(verts, [], faces)
+        mesh.update()
+        
+        obj = bpy.data.objects.new(obj_name, mesh)
+        bpy.context.collection.objects.link(obj)
+        
+        print(f"Imported custom HLIGHT file: {mtx_path} as '{obj_name}'")

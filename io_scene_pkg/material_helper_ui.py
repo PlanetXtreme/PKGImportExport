@@ -36,13 +36,12 @@ class CreateMaterialSetupOperator(Operator):
     def execute(self, context):
         scene = context.scene
         
-        # TODO?
-        # Move most of this into common_helpers, and use it to setup a base for import_helpers
-        # then assign values by getting nodes by name. Currently this is essentially just a huge
-        # copy paste from import_helpers
-        
         # get active material
         ob = context.active_object
+        if ob is None or ob.active_material is None:
+            self.report({'ERROR'}, "No active material found.")
+            return {'CANCELLED'}
+            
         material = ob.active_material
         is_mat_modified = False
         
@@ -63,13 +62,16 @@ class CreateMaterialSetupOperator(Operator):
         # continuing on, we start making the node setup now
         bsdf = material.node_tree.nodes["Principled BSDF"]
         
-        bsdf.inputs['Emission'].default_value = (0, 0, 0, 1)
-        bsdf.inputs['Specular'].default_value = 0.0
-        bsdf.inputs['Roughness'].default_value = 0
+        specular_key = "Specular IOR Level" if "Specular IOR Level" in bsdf.inputs else "Specular"
+        emission_key = "Emission Color" if "Emission Color" in bsdf.inputs else "Emission"
+        
+        bsdf.inputs[emission_key].default_value = (0, 0, 0, 1)
+        bsdf.inputs['Roughness'].default_value = 0.0
+        bsdf.inputs[specular_key].default_value = 0.0
         
         # create image node
         tex_image_node = material.node_tree.nodes.new('ShaderNodeTexImage')
-        tex_image_node.location = mathutils.Vector((-640.0, 20.0))
+        tex_image_node.location = mathutils.Vector((-740.0, 20.0))
         
         # create diffuse blend node
         blend_node = material.node_tree.nodes.new('ShaderNodeMixRGB')
@@ -77,7 +79,7 @@ class CreateMaterialSetupOperator(Operator):
         blend_node.inputs['Fac'].default_value = 1.0
         blend_node.blend_type = 'MULTIPLY'
         blend_node.label = "Diffuse Color"
-        blend_node.location = mathutils.Vector((-260.0, 160.0))
+        blend_node.location = mathutils.Vector((-460.0, 160.0))
         
         # hook up diffuse
         material.node_tree.links.new(blend_node.inputs['Color1'], tex_image_node.outputs['Color'])
@@ -89,21 +91,21 @@ class CreateMaterialSetupOperator(Operator):
         blend_node.inputs['Fac'].default_value = 1.0
         blend_node.blend_type = 'MULTIPLY'
         blend_node.label = "Emission Color"
-        blend_node.location = mathutils.Vector((-260.0, -20.0))
+        blend_node.location = mathutils.Vector((-460.0, -20.0))
         
+        # Note: Linking to the safe emission_key here!
         material.node_tree.links.new(blend_node.inputs['Color1'], tex_image_node.outputs['Color'])
-        material.node_tree.links.new(bsdf.inputs['Emission'], blend_node.outputs['Color'])
+        material.node_tree.links.new(bsdf.inputs[emission_key], blend_node.outputs['Color'])
         
         # create the alpha blend node
         blend_node = material.node_tree.nodes.new('ShaderNodeMath')
         blend_node.inputs[0].default_value = 1.0
         blend_node.operation = 'MULTIPLY'
         blend_node.label = "Alpha"
-        blend_node.location = mathutils.Vector((-260.0, -200.0))
+        blend_node.location = mathutils.Vector((-460.0, -200.0))
         
         material.node_tree.links.new(blend_node.inputs[1], tex_image_node.outputs['Alpha'])
         material.node_tree.links.new(bsdf.inputs['Alpha'], blend_node.outputs[0])
-        
         
         return {'FINISHED'}
         

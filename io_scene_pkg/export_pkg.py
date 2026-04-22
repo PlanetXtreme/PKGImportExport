@@ -8,18 +8,19 @@
 # ##### END LICENSE BLOCK #####
 
 import bpy, bmesh
-import os, time, struct
+import os, time, struct, math
 from functools import cmp_to_key
+from mathutils import Vector
 
 import os.path as path
 
-from io_scene_pkg.fvf import FVF
+from pkgimporter.fvf import FVF
 
-import io_scene_pkg.binary_helper as bin
-import io_scene_pkg.export_helper as export_helper
-import io_scene_pkg.common_helpers as helper
+import pkgimporter.binary_helper as bin
+import pkgimporter.export_helper as export_helper
+import pkgimporter.common_helpers as helper
 
-from io_scene_pkg.shader_set import (ShaderSet, Shader)
+from pkgimporter.shader_set import (ShaderSet, Shader)
 
 # globals
 global pkg_path
@@ -154,11 +155,14 @@ dne_list = ["BOUND", "BINARY_BOUND",
 
 # Misc MTX objects are objects that aren't part of PKG, but 
 # related/essential enough that we load them in for user editing.
-misc_mtx_objects = ["EXHAUST0", "EXHAUST1"]
+misc_mtx_objects = ["EXHAUST0", "EXHAUST1"]#, "HLIGHT_L", "HLIGHT0_L", "HLIGHT1_L"] --HLIGHTs not used in MCSR, custom code for frontend lights (2X)
 
 ######################################################
 # EXPORT HELPERS
 ######################################################
+
+
+
 def unknown_objects_comparison(item1, item2):
     name1 = helper.get_raw_object_name(item1.name)
     name2 = helper.get_raw_object_name(item2.name)
@@ -172,14 +176,14 @@ def unknown_objects_comparison(item1, item2):
     else:
         return 1
 
-
 def reorder_objects(lst, pred):
     return_list = [None] * len(pred)
     append_list = []
     for v in lst:
+        clean_upper_name = helper.get_clean_name(v.name).upper() #removes any .001 from filenames to make things easier for users :)
         try:
             # found in list, add in it's proper order
-            return_list[pred.index(v.name.upper())] = v
+            return_list[pred.index(clean_upper_name)] = v
         except:
             # not found in predicate list, add on to the end
             append_list.append(v)
@@ -220,13 +224,11 @@ def export_xrefs(file, selected_only):
         file.write(struct.pack('LL', file_length, num_xrefs))
         file.seek(0, 2)
 
-
 def export_offset(file):
     bin.write_file_header(file, "offset", 12)
     file.write(struct.pack('fff', 0, 0, 0))
 
-
-def export_shaders(file, context, type="byte"):
+def export_shaders(file, context, type="byte", use_roughness_instead_of_specular_one=True):
     # get our tool
     scene = context.scene
     angel = scene.angel
@@ -262,7 +264,7 @@ def export_shaders(file, context, type="byte"):
             material = bpy.data.materials[material_id]
             
             # create a shader for it, and write it
-            shader = export_helper.create_shader_from_material(material)
+            shader = export_helper.create_shader_from_material(material, use_roughness_instead_of_specular_one)
             shader.write(file, type)
     else:
         # write out user created variants
@@ -278,7 +280,7 @@ def export_shaders(file, context, type="byte"):
                         break
                 
                 # create a shader for it, and write it
-                shader = export_helper.create_shader_from_material(material)
+                shader = export_helper.create_shader_from_material(material, use_roughness_instead_of_specular_one)
                 shader.write(file, type)
 
     # write file length
@@ -287,9 +289,20 @@ def export_shaders(file, context, type="byte"):
     file.write(struct.pack('L', shaders_file_length))
     file.seek(0, 2)
 
-
-def export_geometry(file, meshlist, options):
+def export_geometry(file, meshlist, options, export_headlights):
+    collected_hlight_planes = [] #gets the headlight planes ready
     for obj in meshlist:
+        
+        clean_name = helper.get_clean_name(obj.name).upper()
+        if "HLIGHT" in clean_name or "HEADLIGHT" in clean_name:
+            if export_headlights is True:
+                # Extract planes and add them to our master list
+                extracted_planes = extract_hlight_planes(obj)
+                collected_hlight_planes.extend(extracted_planes)
+            continue #doesn't add hlight to the mesh (regardless of state), only adds it to mtx exporter (for MCSR!)
+        if "BOUND" in clean_name:
+            continue #don't add "bound" to pkg file, since it is only used for .bbnd
+
         # write FILE header for mesh name
         bin.write_file_header(file, helper.get_undupe_name(obj.name))
         file_data_start_offset = file.tell()
@@ -313,12 +326,14 @@ def export_geometry(file, meshlist, options):
         
         # get mesh infos
         export_mats = export_helper.get_used_materials(obj, "MODIFIERS" in options)
+        export_mat_names = {m.name for m in export_mats if m is not None}
+        
         total_verts = len(bm.verts)
         total_faces = int(len(bm_tris) * 3)
         num_sections = len(export_mats)
         
         # debug
-        #print("Exporting object "  + str(obj.name) + ". total_verts=" + str(total_verts) + ", total_faces=" + str(total_faces) +", num_sections=" + str(num_sections))
+        print("Exporting object "  + str(obj.name) + ". total_verts=" + str(total_verts) + ", total_faces=" + str(total_faces) +", num_sections=" + str(num_sections))
         
         #build FVF
         FVF_FLAGS = FVF(("D3DFVF_XYZ", "D3DFVF_NORMAL", "D3DFVF_TEX1"))
@@ -335,8 +350,9 @@ def export_geometry(file, meshlist, options):
 
         # do we need a matrix file? Only for H object
         obj_offcenter = abs(obj.location[0]) > 0.001 or abs(obj.location[1]) > 0.001 or abs(obj.location[2]) > 0.001
-        if obj_offcenter and obj.name.upper().endswith("_H"):
-            export_helper.write_matrix(obj.name, obj, pkg_path)
+        if obj_offcenter and helper.get_clean_name(obj.name).upper().endswith("_H"): #obj_offcenter and 
+           export_helper.write_matrix(obj.name, obj, pkg_path)
+
 
         # write mesh data header
         file.write(struct.pack('LLLLL', num_sections, total_verts, total_faces, num_sections, FVF_FLAGS.value))
@@ -346,13 +362,17 @@ def export_geometry(file, meshlist, options):
         for material in obj.data.materials:
             # get non cloned material
             real_material = material
-            if material.cloned_from is not None:
+            
+            # FIX: Safely retrieve custom 'cloned_from' property to prevent API crashes
+            if material is not None and getattr(material, "cloned_from", None) is not None:
                 real_material = material.cloned_from
             
             # are we exporting this material?
             cur_material_index += 1
-            if not real_material in export_mats:
-              continue
+            
+            # FIX: Use name lookup here 
+            if real_material is None or real_material.name not in export_mat_names:
+                continue
         
             # build the mesh data we need
             cmtl_indices, cmtl_verts, cmtl_uvs, cmtl_cols = export_helper.prepare_mesh_data(bm, cur_material_index, bm_tris)
@@ -388,7 +408,7 @@ def export_geometry(file, meshlist, options):
             for ply in cmtl_indices:
                 file.write(struct.pack('HHH', ply[0], ply[1], ply[2]))
         
-        # clean up temp_mesh
+        # clean up bmesh
         bm.free()
 		
         # write FILE length
@@ -397,6 +417,82 @@ def export_geometry(file, meshlist, options):
         file.write(struct.pack('L', file_data_length))
         file.seek(0, 2)
 
+    if len(collected_hlight_planes) > 0: #adds hlight planes to export list (change from midtown madness)
+        export_hlight_mtx(collected_hlight_planes, pkg_path)
+
+def export_hlight_mtx(planes, pkg_path):
+    """Takes a list of gathered planes and exports up to 2 GLOW .mtx files."""
+    if not planes:
+        return
+
+    # Limit to exactly 2 planes max
+    if len(planes) > 2:
+        print(f"Notice: Found {len(planes)} HLIGHT quads across all objects. Limiting export to 2.")
+        planes = planes[:2]
+
+    # Stabilize order (Left vs Right by X coordinate)
+    planes.sort(key=lambda verts: sum(v.x for v in verts) / len(verts))
+
+    # Strip the .pkg extension off pkg_path to get the base userGivenFilename
+    base_name = os.path.splitext(pkg_path)[0]
+
+    for i, verts in enumerate(planes):
+        # Convert to game space (X, Z, Y)
+        game_corners = [Vector((v.x, v.z, v.y)) for v in verts]
+
+        min_x = min(c.x for c in game_corners)
+        max_x = max(c.x for c in game_corners)
+        min_y = min(c.y for c in game_corners)
+        max_y = max(c.y for c in game_corners)
+        min_z = min(c.z for c in game_corners)
+        max_z = max(c.z for c in game_corners)
+
+        center_x = (max_x + min_x) / 2.0
+        center_y = (max_y + min_y) / 2.0
+        center_z = (max_z + min_z) / 2.0
+
+        float_data = struct.pack('<9f',
+            min_x, min_y, min_z,
+            max_x, max_y, max_z,
+            center_x, center_y, center_z
+        )
+
+        padding_data = b'\x01\x00\x80\x7F' * 3
+
+        output_path = f"{base_name}_HLIGHTGLOW{i}.mtx"
+
+        with open(output_path, 'wb') as f:
+            f.write(float_data)
+            f.write(padding_data)
+
+        print(f"Exported custom HLIGHT file: {output_path}")
+
+def extract_hlight_planes(obj):
+    """Converts an HLIGHT object to quads and returns a list of its planes in world space."""
+    planes = []
+    temp_mesh = obj.to_mesh()
+    temp_bm = bmesh.new()
+    temp_bm.from_mesh(temp_mesh)
+
+    # Convert triangles to quads
+    bmesh.ops.join_triangles(
+        temp_bm, 
+        faces=list(temp_bm.faces), 
+        angle_face_threshold=math.pi, 
+        angle_shape_threshold=math.pi,
+        cmp_seam=False, cmp_sharp=False, cmp_uvs=False, cmp_vcols=False, cmp_materials=False
+    )
+
+    # Extract quads
+    for f in temp_bm.faces:
+        if len(f.verts) == 4:
+            world_verts = [obj.matrix_world @ v.co for v in f.verts]
+            planes.append(world_verts)
+
+    temp_bm.free()
+    obj.to_mesh_clear()
+    
+    return planes
 
 def export_misc_mtx():
     for mtx in misc_mtx_objects:
@@ -412,9 +508,14 @@ def save_pkg(filepath,
              e_vertexcolors_s,
              apply_modifiers,
              selection_only,
+             export_bbnd_file,
+             use_roughness_instead_of_specular_one,
+             export_headlights,
              context):
     global pkg_path
     pkg_path = filepath
+
+    selection_only = True #override. Best usage anyway
 
     print("exporting PKG: %r..." % (filepath))
     
@@ -437,7 +538,6 @@ def save_pkg(filepath,
     else:
       export_objects = bpy.context.scene.objects
     
-      
     # first we need to figure out the export type before anything
     export_pred = generic_list
     export_typestr = 'generic'
@@ -468,6 +568,7 @@ def save_pkg(filepath,
     # finally we need to prepare our geometry list
     export_geomlist = []
     for obj in export_objects:
+        clean_upper_name = helper.get_clean_name(obj.name).upper()
         if (obj.type == 'MESH' and not obj.name.upper() in dne_list):
             export_geomlist.append(obj)
 
@@ -482,9 +583,9 @@ def save_pkg(filepath,
     # begin write pkg file
     file.write(bytes('PKG3', 'utf-8'))
     print('\t[%.4f] exporting mesh data' % (time.perf_counter() - time1))
-    export_geometry(file, reorder_objects(export_geomlist, export_pred), export_options)
+    export_geometry(file, reorder_objects(export_geomlist, export_pred), export_options, export_headlights)
     print('\t[%.4f] exporting shaders' % (time.perf_counter() - time1))
-    export_shaders(file, context, export_shadertype)
+    export_shaders(file, context, export_shadertype, use_roughness_instead_of_specular_one)
     print('\t[%.4f] exporting xrefs' % (time.perf_counter() - time1))
     export_xrefs(file, selection_only)
     print('\t[%.4f] exporting offset' % (time.perf_counter() - time1))
@@ -502,7 +603,10 @@ def save(operator,
          e_vertexcolors=False,
          e_vertexcolors_s=False,
          apply_modifiers=False,
-         selection_only=False
+         selection_only=True,
+         export_bbnd_file=True,
+         use_roughness_instead_of_specular_one=True,
+         export_headlights=True,
          ):
     
     # save PKG
@@ -511,6 +615,9 @@ def save(operator,
              e_vertexcolors_s,
              apply_modifiers,
              selection_only,
+             export_bbnd_file,
+             use_roughness_instead_of_specular_one,
+             export_headlights,
              context,
              )
 

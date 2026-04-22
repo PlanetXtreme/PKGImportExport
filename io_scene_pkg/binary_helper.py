@@ -10,7 +10,7 @@
 import bpy, struct, mathutils
 from bpy_extras.io_utils import axis_conversion
 import math
-import io_scene_pkg.common_helpers as helper
+import pkgimporter.common_helpers as helper
 
 ########
 # READ #

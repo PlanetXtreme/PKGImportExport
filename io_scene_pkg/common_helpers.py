@@ -11,7 +11,7 @@ import bpy
 import os, struct
 import os.path as path
 
-from io_scene_pkg.tex_file import TEXFile
+from pkgimporter.tex_file import TEXFile
 
 def make_placeholder_texture(name):
     ptw = 2
@@ -122,7 +122,12 @@ def get_object_lod_name(item):
     elif item_upper == 'H' or item_upper == 'M' or item_upper == 'L' or item_upper == 'VL':
         return item_upper
     return None
-
+    
+def get_clean_name(name):
+    """Strips Blender's .001, .002, etc duplication suffixes"""
+    if "." in name and name.rsplit(".", 1)[1].isdigit():
+        return name.rsplit(".", 1)[0]
+    return name
 
 def get_alphabetical_lod_id(item):
     if item == 'H':

@@ -12,12 +12,14 @@ import os, time, struct, math
 
 import os.path as path
 from mathutils import*
-from io_scene_pkg.fvf import FVF
-from io_scene_pkg.shader_set import (ShaderSet, Shader)
 
-import io_scene_pkg.binary_helper as bin
-import io_scene_pkg.import_helper as import_helper
-import io_scene_pkg.common_helpers as helper
+from pkgimporter.fvf import FVF
+from pkgimporter.shader_set import (ShaderSet, Shader)
+
+import pkgimporter.binary_helper as bin
+import pkgimporter.import_helper as import_helper
+import pkgimporter.common_helpers as helper
+import pkgimporter.import_bbnd as extract_bbnd_file
 
 pkg_path = None
 
@@ -32,7 +34,7 @@ misc_mtx_objects = ["EXHAUST0", "EXHAUST1"]
 ######################################################
 # IMPORT MAIN FILES
 ######################################################
-def read_shaders_file(file, length, offset, import_variants):
+def read_shaders_file(file, length, offset, import_variants, use_roughness_instead_of_specular_two):
     # get custom stuff
     scene = bpy.context.scene
     angel = scene.angel
@@ -54,7 +56,7 @@ def read_shaders_file(file, length, offset, import_variants):
         
         mtl = bpy.data.materials.get(str(shader_num))
         if mtl is not None:
-            import_helper.populate_material(mtl, shader, pkg_path)
+            import_helper.populate_material(mtl, shader, pkg_path, use_roughness_instead_of_specular_two)
             base_material_set.append(mtl)
         else:
             base_material_set.append(None) # SHOULD NOT HAPPEN!
@@ -97,7 +99,7 @@ def read_shaders_file(file, length, offset, import_variants):
             variant_material = tool_variant.add_material(base_mtl)
             
             # adjust the cloned version
-            import_helper.populate_material(variant_material.material, shader, pkg_path)
+            import_helper.populate_material(variant_material.material, shader, pkg_path, use_roughness_instead_of_specular_two)
             variant_material.material.name = helper.get_undupe_name(variant_material.material.name) + "_VARIANT" + str(variant_num)
             
     # apply it 
@@ -107,7 +109,6 @@ def read_shaders_file(file, length, offset, import_variants):
     # skip to the end of this FILE
     file.seek(length - (file.tell() - offset), 1)
     return
-
 
 def read_xrefs(file):
     scn = bpy.context.scene
@@ -134,7 +135,6 @@ def read_xrefs(file):
         ob.show_name = True
         ob.show_axis = True
         scn.collection.objects.link(ob)
-
 
 def read_geometry_file(file, meshname):
     scn = bpy.context.scene
@@ -271,8 +271,8 @@ def read_geometry_file(file, meshname):
     bm.free()
     
     # calculate normals
-    if FVF_FLAGS.has_flag("D3DFVF_NORMAL"):
-      me.calc_normals()
+    #if FVF_FLAGS.has_flag("D3DFVF_NORMAL"):
+      #me.calc_normals()
 
     # lastly, look for a MTX file. Don't grab an MTX for FNDR_M/L/VL though
     # as the FNDR lods are static and don't use the mtx
@@ -301,12 +301,15 @@ def import_misc_mtx():
             ob.show_name = True
             scn.collection.objects.link(ob)
         
+
 ######################################################
 # IMPORT
 ######################################################
 def load_pkg(filepath,
              context,
-             import_variants=True):
+             import_variants=True, import_bbnd=True, 
+             use_roughness_instead_of_specular_two=True,
+             import_headlights=True,):
     # set the PKG path, used for finding textures
     global pkg_path
     pkg_path = filepath
@@ -319,6 +322,24 @@ def load_pkg(filepath,
 
     time1 = time.perf_counter()
     file = open(filepath, 'rb')
+
+    #do misc operations (bbnd, mtx headlights)
+    if import_bbnd == True:
+        print(f"import bbnd is true lessgo")
+        bbnd_path = extract_bbnd_file.find_bbnd(pkg_path)
+        print(f"bbnd_path is {bbnd_path}. Look good?")
+
+        if bbnd_path:
+            print("Found:", bbnd_path)
+            extract_bbnd_file.runs(bbnd_path, None)
+
+    import_misc_mtx()
+
+    if import_headlights is True:
+        print(f"FILEPATH IS {filepath}")
+        import_helper.import_headlight_objs(filepath)
+
+    # END READ MISC MTX
 
     # start reading our pkg file
     pkg_version = file.read(4).decode("utf-8")
@@ -361,7 +382,7 @@ def load_pkg(filepath,
         print('\t[' + str(round(time.perf_counter() - time1, 3)) + '] processing : ' + file_name)
         if file_name == "shaders":
             # load shaders file
-            read_shaders_file(file, file_length, file.tell(), import_variants)
+            read_shaders_file(file, file_length, file.tell(), import_variants, use_roughness_instead_of_specular_two)
         elif file_name == "offset":
             # skip over this, seems it's meta
             if pkg_version_id == 3:
@@ -375,9 +396,6 @@ def load_pkg(filepath,
             read_geometry_file(file, file_name)
     # END READ PKG FILE DATA
     
-    # READ MISC MTX
-    import_misc_mtx()
-    # END READ MISC MTX
     
     print(" done in %.4f sec." % (time.perf_counter() - time1))
     file.close()
@@ -386,12 +404,18 @@ def load_pkg(filepath,
 def load(operator,
          context,
          filepath="",
-         import_variants=True
+         import_variants=True,
+         import_bbnd=True,
+         use_roughness_instead_of_specular_two=True,
+         import_headlights=True,
          ):
          
     load_pkg(filepath,
              context,
-             import_variants
+             import_variants,
+             import_bbnd,
+             use_roughness_instead_of_specular_two,
+             import_headlights,
              )
 
     return {'FINISHED'}

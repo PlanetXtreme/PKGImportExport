@@ -234,22 +234,22 @@ def populate_material(mtl=None, shader=None, pkg_path="", use_roughness_instead=
 
 def import_headlight_objs(filepath):
     """
-    Finds and imports HEADLIGHT / HLIGHT .mtx files that strictly match the 
-    base name of the given filepath. Reconstructs them as plane objects in Blender.
+    Finds and imports HEADLIGHT / HLIGHT (with optional GLOW) .mtx files that 
+    strictly match the base name of the given filepath. 
+    Reconstructs them as plane objects in Blender.
     """
-
-    # "dir/geometry/example.pkg" -> directory: "dir/geometry", base_name: "example"
+    
     directory = os.path.dirname(filepath)
     if not directory:
-        directory = "."  # fallback to current directory if only a filename is passed
+        directory = "."
         
     filename = os.path.basename(filepath)
     base_name = os.path.splitext(filename)[0]
     
-    pattern_str = r"^" + re.escape(base_name) + r"_?(HEADLIGHT|HLIGHT)\d*\.mtx$"
+    pattern_str = r"^" + re.escape(base_name) + r"_?(HEADLIGHT|HLIGHT)(GLOW)?\d*\.mtx$"
     regex = re.compile(pattern_str, re.IGNORECASE)
     
-    # Search for perfectly matching MTX files
+    # 3. Search the directory for perfectly matching MTX files
     mtx_files =[]
     if os.path.exists(directory):
         for f in os.listdir(directory):
@@ -261,16 +261,16 @@ def import_headlight_objs(filepath):
         return
         
     for mtx_path in mtx_files:
-        # Get the filename to name our Blender object
         file_base = os.path.basename(mtx_path)
         obj_name = os.path.splitext(file_base)[0]
         
-        # Strip the "example_" prefix to make the object name clean in Blender
-        if "HEADLIGHT" in obj_name.upper():
-            start_index = obj_name.upper().find("HEADLIGHT")
+        # Strip the base prefix to make the object name clean in Blender (e.g. "HLIGHTGLOW0")
+        obj_upper = obj_name.upper()
+        if "HEADLIGHT" in obj_upper:
+            start_index = obj_upper.find("HEADLIGHT")
             obj_name = obj_name[start_index:]
-        elif "HLIGHT" in obj_name.upper():
-            start_index = obj_name.upper().find("HLIGHT")
+        elif "HLIGHT" in obj_upper:
+            start_index = obj_upper.find("HLIGHT")
             obj_name = obj_name[start_index:]
 
         with open(mtx_path, 'rb') as f:
@@ -285,9 +285,6 @@ def import_headlight_objs(filepath):
              g_maxX, g_maxY, g_maxZ, 
              g_centerX, g_centerY, g_centerZ) = struct.unpack('<9f', float_data)
              
-        # Convert Game Space back to Blender Space
-        # Export did: Game_X = Blen_X | Game_Y = Blen_Z | Game_Z = Blen_Y
-        # So Import:  Blen_X = Game_X | Blen_Y = Game_Z | Blen_Z = Game_Y
         b_minX, b_maxX = g_minX, g_maxX
         b_minY, b_maxY = g_minZ, g_maxZ
         b_minZ, b_maxZ = g_minY, g_maxY
@@ -300,7 +297,7 @@ def import_headlight_objs(filepath):
             (b_minX, b_maxY, b_maxZ), # Top-Left
         ]
         
-        faces =[(0, 1, 2, 3)]
+        faces = [(0, 1, 2, 3)]
         
         # Create Blender mesh and object
         mesh = bpy.data.meshes.new(name=obj_name)

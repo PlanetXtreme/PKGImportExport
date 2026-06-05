@@ -288,7 +288,8 @@ def read_geometry_file(file, meshname):
         if found:
             ob.location = origin
           
-    return
+    # NEW: Return the object so load_pkg can apply the offset to it later
+    return ob
 
 def import_misc_mtx():
     scn = bpy.context.scene
@@ -305,11 +306,15 @@ def import_misc_mtx():
 ######################################################
 # IMPORT
 ######################################################
-def load_pkg(filepath,
+def load_pkg(
+             filepath,
              context,
-             import_variants=True, import_bbnd=True, 
+             import_variants=True, 
+             import_bbnd=True, 
              use_roughness_instead_of_specular_two=True,
-             import_headlights=True,):
+             import_headlights=True,
+             import_coordinate_offset=True,
+             ):
     # set the PKG path, used for finding textures
     global pkg_path
     pkg_path = filepath
@@ -351,6 +356,10 @@ def load_pkg(filepath,
     pkg_version_id = int(pkg_version[-1:])
 
     # read pkg FILE's
+    pkg_offset = None
+    imported_objects = []
+
+    # read pkg FILE's
     pkg_size = path.getsize(filepath)
     while file.tell() != pkg_size:
         file_header = None
@@ -384,19 +393,36 @@ def load_pkg(filepath,
             # load shaders file
             read_shaders_file(file, file_length, file.tell(), import_variants, use_roughness_instead_of_specular_two)
         elif file_name == "offset":
-            # skip over this, seems it's meta
-            if pkg_version_id == 3:
-               file.seek(file_length, 1)
+            # NEW: Read offset coordinates, but don't apply them yet
+            if import_coordinate_offset:
+                offset_data = struct.unpack('<3f', file.read(12))
+                pkg_offset = helper.convert_vecspace_to_blender(offset_data)
+                
+                if pkg_version_id == 3 and file_length > 12:
+                    file.seek(file_length - 12, 1)
             else:
-              file.seek(12, 1)
+                if pkg_version_id == 3:
+                   file.seek(file_length, 1)
+                else:
+                  file.seek(12, 1)
         elif file_name == "xrefs":
             read_xrefs(file)
         else:
             # assume geometry
-            read_geometry_file(file, file_name)
+            # NEW: capture the returned object and add it to our list
+            new_obj = read_geometry_file(file, file_name)
+            if new_obj is not None:
+                imported_objects.append(new_obj)
+
     # END READ PKG FILE DATA
     
-    
+    # NEW: The file reading loop is done. If we found an offset, apply it to all objects now!
+    if import_coordinate_offset and pkg_offset is not None:
+        for obj in imported_objects:
+            obj.location[0] += pkg_offset[0]
+            obj.location[1] += pkg_offset[1]
+            obj.location[2] += pkg_offset[2]
+
     print(" done in %.4f sec." % (time.perf_counter() - time1))
     file.close()
 
@@ -408,6 +434,7 @@ def load(operator,
          import_bbnd=True,
          use_roughness_instead_of_specular_two=True,
          import_headlights=True,
+         import_coordinate_offset=True,
          ):
          
     load_pkg(filepath,
@@ -416,6 +443,7 @@ def load(operator,
              import_bbnd,
              use_roughness_instead_of_specular_two,
              import_headlights,
+             import_coordinate_offset,
              )
 
     return {'FINISHED'}

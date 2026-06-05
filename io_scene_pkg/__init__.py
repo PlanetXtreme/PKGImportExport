@@ -6,7 +6,7 @@
 bl_info = {
     "name": "Angel Studios PKG Format",
     "author": "Dummiesman, other", #edited for Blender 5.0 + MCSR compatibility by Planet Xtreme but he doesn't deserve credit, does he
-    "version": (1, 0, 1),
+    "version": (1, 0, 3),
     "blender": (5, 1, 0),
     "location": "File > Import-Export",
     "description": "Import-Export PKG files",
@@ -24,6 +24,7 @@ import pkgimporter.import_tex as import_tex
 import pkgimporter.material_helper_ui as material_helper_ui
 import json #for saved export/import settings :)
 import os
+from bpy.props import StringProperty, BoolProperty, CollectionProperty
 
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "pkg_addon_settings.json")
 
@@ -71,6 +72,13 @@ class ImportPKG(bpy.types.Operator, ImportHelper):
 
     filename_ext = ".pkg"
     filter_glob: StringProperty(default="*.pkg", options={'HIDDEN'})
+    files: CollectionProperty(
+        name="File Path",
+        type=bpy.types.OperatorFileListElement,
+    )
+    directory: StringProperty(
+        subtype='DIR_PATH',
+    )
 
     import_variants: BoolProperty(
         name="Import LOD Variants",
@@ -96,6 +104,11 @@ class ImportPKG(bpy.types.Operator, ImportHelper):
         default=user_settings.get("use_roughness_instead_of_specular_two", True),
         )
 
+    import_coordinate_offset: BoolProperty(
+        name="Import Coordinate offset",
+        description="All MCSR pkg files have a file footer that describes the coordinates of the pkg in MCSR world space; Place object at those coordinates in Blender space?",
+        default=user_settings.get("import_coordinate_offset", True),
+        )    
     def execute(self, context):
 
         save_settings({
@@ -103,6 +116,7 @@ class ImportPKG(bpy.types.Operator, ImportHelper):
             "import_bbnd": self.import_bbnd,
             "use_roughness_instead_of_specular_two": self.use_roughness_instead_of_specular_two,
             "import_headlights": self.import_headlights,
+            "import_coordinate_offset": self.import_coordinate_offset,
         })
 
         from . import import_pkg
@@ -110,9 +124,20 @@ class ImportPKG(bpy.types.Operator, ImportHelper):
                                             "axis_up",
                                             "filter_glob",
                                             "check_existing",
+                                            "filepath",
+                                            "files",
+                                            "directory"
                                             ))
-
-        return import_pkg.load(self, context, **keywords)
+        if self.files:
+            for file_elem in self.files:
+                # Combine the folder path and the file name
+                full_filepath = os.path.join(self.directory, file_elem.name)
+                
+                # Run the import load function for this specific file
+                import_pkg.load(self, context, filepath=full_filepath, **keywords)
+        else:
+            # Fallback just in case standard single-selection occurs
+            import_pkg.load(self, context, filepath=self.filepath, **keywords)
 
 class ImportBBND(bpy.types.Operator, ImportHelper):
     """Import the bbnd file format (.bbnd)"""

@@ -128,7 +128,7 @@ def read_vertex_data(file, FVF_FLAGS, compressed):
 
 def populate_material(mtl=None, shader=None, pkg_path="", use_roughness_instead=True):
     """ Initializes a material """
-    print(f"use_roughness_instead_of_specular is {use_roughness_instead}")
+    #print(f"use_roughness_instead_of_specular is {use_roughness_instead}")
     # get addon settings
     preferences = bpy.context.preferences
     addon_prefs = preferences.addons[__package__].preferences    

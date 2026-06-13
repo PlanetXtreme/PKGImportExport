@@ -4,8 +4,7 @@ import os
 import math
 from mathutils import Matrix
 from pathlib import Path
-
-def runs(operator, context):
+def runs(operator, context, root_parent_obj=None, target_collection=None):
     FIX_COORDINATE_ROTATION = True
 
     filepath = None
@@ -13,12 +12,10 @@ def runs(operator, context):
     # Primary: operator.filepath
     if hasattr(operator, "filepath"):
         filepath = operator.filepath
-
     # Fallback: operator itself might be a string path
     elif isinstance(operator, str):
         filepath = operator
 
-    # If still nothing usable
     if not filepath or not os.path.exists(filepath):
         print({'ERROR'}, f"Cannot find file at {filepath}")
         return {'CANCELLED'}
@@ -64,7 +61,12 @@ def runs(operator, context):
     mesh = bpy.data.meshes.new(mesh_name)
     obj = bpy.data.objects.new(mesh_name, mesh)
     
-    bpy.context.collection.objects.link(obj)
+    # FIX: Link to the specific PKG collection instead of default
+    if target_collection:
+        target_collection.objects.link(obj)
+    else:
+        bpy.context.collection.objects.link(obj)
+        
     mesh.from_pydata(verts, [], faces)
     mesh.update()
 
@@ -92,6 +94,11 @@ def runs(operator, context):
     
     # Apply Transforms (Location, Rotation, Scale)
     bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+
+    # FIX: Parent to the Master Root Object AFTER applying transforms 
+    # so the rotation is baked safely into the vertices
+    if root_parent_obj:
+        obj.parent = root_parent_obj
 
     print({'INFO'}, f"Successfully imported BBND: {mesh_name}")
     return {'FINISHED'}

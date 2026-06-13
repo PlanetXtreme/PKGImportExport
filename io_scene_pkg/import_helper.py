@@ -231,8 +231,8 @@ def populate_material(mtl=None, shader=None, pkg_path="", use_roughness_instead=
         bsdf.inputs['Alpha'].default_value = mtl_alpha
         
     mtl.name = texture_name
-
-def import_headlight_objs(filepath):
+    
+def import_headlight_objs(filepath, root_parent_obj=None, target_collection=None):
     """
     Finds and imports HEADLIGHT / HLIGHT (with optional GLOW) .mtx files that 
     strictly match the base name of the given filepath. 
@@ -305,6 +305,15 @@ def import_headlight_objs(filepath):
         mesh.update()
         
         obj = bpy.data.objects.new(obj_name, mesh)
-        bpy.context.collection.objects.link(obj)
+        
+        # FIX: Link to the specific PKG collection instead of default
+        if target_collection:
+            target_collection.objects.link(obj)
+        else:
+            bpy.context.collection.objects.link(obj)
+            
+        # FIX: Parent to the Master Root Object
+        if root_parent_obj:
+            obj.parent = root_parent_obj
         
         print(f"Imported custom HLIGHT file: {mtx_path} as '{obj_name}'")

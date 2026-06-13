@@ -31,6 +31,54 @@ pkg_path = None
 # related/essential enough that we load them in for user editing.
 misc_mtx_objects = ["EXHAUST0", "EXHAUST1"]
 
+XREF_CACHE = {} 
+def fast_scan_for_skip(filepath, filter_mode):
+    if filter_mode == 'NONE':
+        return False
+        
+    basename = path.basename(filepath).lower()
+    
+    # REQ #1: Check if filename has sp_ to skip
+    if basename.startswith("sp_"):
+        if filter_mode in ['SKIP_SP', 'SKIP_UNP']:
+            return True # Skip it
+            
+    # REQ #2: Check coordinate data FIRST
+    if filter_mode == 'SKIP_UNP':
+        try:
+            with open(filepath, 'rb') as f:
+                pkg_version = f.read(4).decode("utf-8", errors="ignore")
+                if pkg_version not in ["PKG3", "PKG2"]:
+                    return False
+                
+                pkg_version_id = int(pkg_version[-1:])
+                pkg_size = path.getsize(filepath)
+                
+                # Fast forward through file blocks
+                while f.tell() < pkg_size:
+                    file_header = f.read(4).decode("utf-8", errors="ignore")
+                    if file_header != "FILE": break
+                    
+                    file_name = bin.read_angel_string(f)
+                    file_length = 0 if pkg_version_id == 2 else struct.unpack('L', f.read(4))[0]
+                    
+                    if file_name == "offset":
+                        # We found the offset! Check if it's 0,0,0
+                        offset_data = struct.unpack('<3f', f.read(12))
+                        # If sum of absolute coords is basically 0, it's unpositioned
+                        if sum(abs(v) for v in offset_data) < 0.001:
+                            return True # Skip it, it's 0,0,0
+                        return False # It has a position, DO NOT skip
+                    else:
+                        if pkg_version_id == 3 and file_length > 0:
+                            f.seek(file_length, 1) # Skip block quickly
+                        elif pkg_version_id == 2:
+                            return False # PKG2 is hard to fast-forward without parsing
+        except Exception:
+            pass # If fast scan fails, just import it normally
+            
+    return False
+
 ######################################################
 # IMPORT MAIN FILES
 ######################################################
@@ -110,33 +158,89 @@ def read_shaders_file(file, length, offset, import_variants, use_roughness_inste
     file.seek(length - (file.tell() - offset), 1)
     return
 
-def read_xrefs(file):
-    scn = bpy.context.scene
+def read_xrefs(file, root_parent_obj, collection, xref_handling_mode, parent_filepath, context):
+    if xref_handling_mode == 'SKIP':
+        num_xrefs = struct.unpack('L', file.read(4))[0]
+        # Skip logic here (approximate byte skipping if you have it)
+        return
 
-    # read xrefs
     num_xrefs = struct.unpack('L', file.read(4))[0]
     for num in range(num_xrefs):
-        # read matrix
         mtx = bin.read_matrix3x4(file)
 
-        # read in xref name, and remove junk Angel Studios didn't null
-        xref_name_bytes = bytearray(file.read(32))
-        for b in range(len(xref_name_bytes)):
-          if xref_name_bytes[b] > 126:
-            xref_name_bytes[b] = 0
+        raw_bytes = file.read(32)
+        # C-style strings terminate at the first null byte. 
+        # Everything after it is uninitialized garbage memory, so we cut it off.
+        null_index = raw_bytes.find(b'\x00')
+        if null_index != -1:
+            raw_bytes = raw_bytes[:null_index]
+            
+        # Decode and strip any leftover whitespace
+        xref_name = raw_bytes.decode("utf-8", errors="ignore").strip()
         
-        # setup object
-        xref_name = xref_name_bytes.decode("utf-8")
+        # Setup Empty
         ob = bpy.data.objects.new("xref:" + xref_name, None)
-        
-        # set matrix
         ob.matrix_basis = mtx
-        
         ob.show_name = True
         ob.show_axis = True
-        scn.collection.objects.link(ob)
+        ob.parent = root_parent_obj 
+        collection.objects.link(ob) 
+        
+        # --- NEW REALIZATION LOGIC ---
+        if xref_handling_mode == 'GEOMETRY':
+            
+            # SAFE CACHE CHECK: Ensure the cache exists AND the Blender data hasn't been deleted
+            is_cached_and_alive = False
+            if xref_name in XREF_CACHE:
+                cached_col = XREF_CACHE[xref_name]
+                if cached_col is None:
+                    is_cached_and_alive = True # Valid 'None' (file wasn't found previously)
+                else:
+                    try:
+                        _ = cached_col.name # Tests if the C-struct is still alive
+                        is_cached_and_alive = True
+                    except ReferenceError:
+                        pass # It was deleted by the user! We must re-import.
 
-def read_geometry_file(file, meshname):
+            if not is_cached_and_alive:
+                
+                # 1. Look for the target pkg file in the same directory
+                parent_dir = os.path.dirname(parent_filepath)
+                
+                # Check for direct name, or sp_ prefix
+                search_path = os.path.join(parent_dir, f"{xref_name}.pkg")
+                if not os.path.exists(search_path):
+                    search_path = os.path.join(parent_dir, f"sp_{xref_name}.pkg")
+                    
+                if os.path.exists(search_path):
+                    # 2. Call load_pkg to import the xref, getting the resulting Collection back
+                    imported_collection = load_pkg(
+                        filepath=search_path,
+                        context=context,
+                        import_variants=False,
+                        import_bbnd=False,
+                        use_roughness_instead_of_specular_two=True,
+                        import_headlights=False, 
+                        import_coordinate_offset=True,
+                        batch_import_filter='NONE', 
+                        xref_handling_mode='SKIP',  
+                        is_batch_mode=False,
+                        is_xref_import=True 
+                    )
+                    
+                    # 3. Add to Cache
+                    XREF_CACHE[xref_name] = imported_collection
+                else:
+                    XREF_CACHE[xref_name] = None
+                    print(f"Warning: Could not find xref file for {xref_name}")
+            
+            # 4. Apply to Empty
+            cached_col = XREF_CACHE.get(xref_name)
+            if cached_col is not None:
+                ob.instance_type = 'COLLECTION'
+                ob.instance_collection = cached_col
+
+def read_geometry_file(file, meshname, root_parent_obj, collection):
     scn = bpy.context.scene
 
     # add a mesh and link it to the scene
@@ -170,6 +274,9 @@ def read_geometry_file(file, meshname):
     mesh_colors = []
     
     index_offset = 0
+
+    collection.objects.link(ob)
+    ob.parent = root_parent_obj
     
     # read sections
     for num in range(num_sections):
@@ -239,29 +346,33 @@ def read_geometry_file(file, meshname):
              triangle_data = struct.unpack(str(num_indices) + 'H', file.read(2 * num_indices))
 
             for i in range(0, len(triangle_data), 3):
-              tri_indices = triangle_data[i:i+3]
-              try:
-                  # get verts
-                  v0 = mesh_vertices[vertex_index_remap[tri_indices[0]+index_offset]]
-                  v1 = mesh_vertices[vertex_index_remap[tri_indices[1]+index_offset]]
-                  v2 = mesh_vertices[vertex_index_remap[tri_indices[2]+index_offset]]
-                  
-                  # setup face
-                  face = bm.faces.new((v0, v1, v2))
-                  face.smooth = True
-                  face.material_index = ob_current_material
-                  
-                  # set uvs
-                  for uv_set_loop in range(3):
-                    face.loops[uv_set_loop][uv_layer].uv = mesh_uvs[tri_indices[uv_set_loop] + index_offset]
+                tri_indices = triangle_data[i:i+3]
+                try:
+                    # get verts
+                    v0 = mesh_vertices[vertex_index_remap[tri_indices[0]+index_offset]]
+                    v1 = mesh_vertices[vertex_index_remap[tri_indices[1]+index_offset]]
+                    v2 = mesh_vertices[vertex_index_remap[tri_indices[2]+index_offset]]
                     
-                  # set colors
-                  if FVF_FLAGS.has_flag("D3DFVF_DIFFUSE") or FVF_FLAGS.has_flag("D3DFVF_SPECULAR"):
-                      for color_set_loop in range(3):
-                        face.loops[color_set_loop][vc_layer] = mesh_colors[tri_indices[color_set_loop] + index_offset]
+                    # setup face
+                    face = bm.faces.new((v0, v1, v2))
+                    face.smooth = True
+                    face.material_index = ob_current_material
                     
-              except Exception as e:
-                  print(str(e))
+                    # set uvs
+                    for uv_set_loop in range(3):
+                      face.loops[uv_set_loop][uv_layer].uv = mesh_uvs[tri_indices[uv_set_loop] + index_offset]
+                      
+                    # set colors
+                    if FVF_FLAGS.has_flag("D3DFVF_DIFFUSE") or FVF_FLAGS.has_flag("D3DFVF_SPECULAR"):
+                        for color_set_loop in range(3):
+                            color = mesh_colors[tri_indices[color_set_loop] + index_offset]
+                            # Blender requires RGBA (4 floats). If we only have RGB, add Alpha 1.0
+                            if len(color) == 3:
+                                color = (color[0], color[1], color[2], 1.0)
+                            
+                            face.loops[color_set_loop][vc_layer] = color
+                except Exception as e:
+                    print(str(e))
             
             index_offset += num_vertices
 
@@ -288,11 +399,10 @@ def read_geometry_file(file, meshname):
         if found:
             ob.location = origin
           
-    # NEW: Return the object so load_pkg can apply the offset to it later
+    # Return the object so load_pkg can apply the offset to it later
     return ob
 
-def import_misc_mtx():
-    scn = bpy.context.scene
+def import_misc_mtx(root_parent_obj, collection):
     for mtx in misc_mtx_objects:
         found, min, max, pivot, origin = import_helper.find_matrix(mtx, pkg_path)
         if found:
@@ -300,53 +410,73 @@ def import_misc_mtx():
             ob.location = origin
             ob.empty_display_size = 0.5
             ob.show_name = True
-            scn.collection.objects.link(ob)
+            ob.parent = root_parent_obj
+            collection.objects.link(ob)
         
-
 ######################################################
 # IMPORT
 ######################################################
-def load_pkg(
-             filepath,
-             context,
-             import_variants=True, 
-             import_bbnd=True, 
-             use_roughness_instead_of_specular_two=True,
-             import_headlights=True,
-             import_coordinate_offset=True,
-             ):
-    # set the PKG path, used for finding textures
-    global pkg_path
-    pkg_path = filepath
 
-    # start import
+def load_pkg(
+                filepath,
+                context,
+                import_variants=True, 
+                import_bbnd=True, 
+                use_roughness_instead_of_specular_two=True,
+                import_headlights=True,
+                import_coordinate_offset=True,
+                batch_import_filter='NONE', 
+                xref_handling_mode='EMPTYS',
+                is_batch_mode=False,
+                is_xref_import=False
+            ):
+
+    global pkg_path
+    previous_pkg_path = pkg_path 
+    pkg_path = filepath
+    
+    # Force NONE if only one file is selected
+    if not is_batch_mode:
+        batch_import_filter = 'NONE'
+
+    # Check if we should skip this file BEFORE reading it
+    if fast_scan_for_skip(filepath, batch_import_filter):
+        print(f"Skipping PKG (Filtered out): {path.basename(filepath)}")
+        return
+
     print("importing PKG: %r..." % (filepath))
 
     if bpy.ops.object.select_all.poll():
         bpy.ops.object.select_all(action='DESELECT')
 
     time1 = time.perf_counter()
+    
+    # Create a Collection for this specific PKG
+    base_name = path.splitext(path.basename(filepath))[0]
+    pkg_collection = bpy.data.collections.new(base_name)
+    
+    # Safely link it so it has a User and isn't garbage collected
+    if is_xref_import:
+        # Put Xrefs in a hidden master library collection
+        lib_col = bpy.data.collections.get("XREF_LIBRARY")
+        if not lib_col:
+            lib_col = bpy.data.collections.new("XREF_LIBRARY")
+            context.scene.collection.children.link(lib_col)
+            
+            lib_col.hide_viewport = True
+            lib_col.hide_render = True
+            
+        lib_col.children.link(pkg_collection)
+    else:
+        # Standard maps/vehicles go in the active scene collection
+        active_col = context.collection if context.collection else context.scene.collection
+        active_col.children.link(pkg_collection)
+
+    # Create Master Root Object at 0,0,0
+    root_ob = bpy.data.objects.new(f"ROOOOT_{base_name}", None) #ROOOOT_ will not match any reasonable filename/architecture
+    pkg_collection.objects.link(root_ob)
+
     file = open(filepath, 'rb')
-
-    #do misc operations (bbnd, mtx headlights)
-    if import_bbnd == True:
-        print(f"import bbnd is true lessgo")
-        bbnd_path = extract_bbnd_file.find_bbnd(pkg_path)
-        print(f"bbnd_path is {bbnd_path}. Look good?")
-
-        if bbnd_path:
-            print("Found:", bbnd_path)
-            extract_bbnd_file.runs(bbnd_path, None)
-
-    import_misc_mtx()
-
-    if import_headlights is True:
-        print(f"FILEPATH IS {filepath}")
-        import_helper.import_headlight_objs(filepath)
-
-    # END READ MISC MTX
-
-    # start reading our pkg file
     pkg_version = file.read(4).decode("utf-8")
     if pkg_version != "PKG3" and pkg_version != "PKG2":
         print('\tFatal Error: PKG file is wrong format : ' + pkg_version)
@@ -354,96 +484,70 @@ def load_pkg(
         return
         
     pkg_version_id = int(pkg_version[-1:])
-
-    # read pkg FILE's
     pkg_offset = None
     imported_objects = []
 
-    # read pkg FILE's
+    # READ PKG DATA
     pkg_size = path.getsize(filepath)
     while file.tell() != pkg_size:
-        file_header = None
-        try:
-          file_header = file.read(4).decode("utf-8")
-        except Exception as e:
-          print("cannot decode file header @ " + str(file.tell()))
-          print(str(e))
-          file.close()
-          raise
+        file_header = file.read(4).decode("utf-8")
+        if file_header != "FILE": break
 
-        # check for an invalid header
-        if file_header != "FILE":
-            print('\tFatal Error: PKG file is corrupt, missing FILE header at ' + str(file.tell()))
-            file.close()
-            return
-
-        # found a proper FILE header
         file_name = bin.read_angel_string(file)
         file_length = 0 if pkg_version_id == 2 else struct.unpack('L', file.read(4))[0]
         
-        # Angel released a very small batch of corrupt PKG files
-        # this is here just in case someone tries to import one
-        if file_length == 0 and pkg_version_id == 3:
-            print("Invalid PKG3 file : cannot have file length of 0")
-            file.close()
-            return
-            
         print('\t[' + str(round(time.perf_counter() - time1, 3)) + '] processing : ' + file_name)
         if file_name == "shaders":
-            # load shaders file
             read_shaders_file(file, file_length, file.tell(), import_variants, use_roughness_instead_of_specular_two)
         elif file_name == "offset":
-            # NEW: Read offset coordinates, but don't apply them yet
-            if import_coordinate_offset:
-                offset_data = struct.unpack('<3f', file.read(12))
-                pkg_offset = helper.convert_vecspace_to_blender(offset_data)
-                
-                if pkg_version_id == 3 and file_length > 12:
-                    file.seek(file_length - 12, 1)
-            else:
-                if pkg_version_id == 3:
-                   file.seek(file_length, 1)
-                else:
-                  file.seek(12, 1)
+            # Just read the offset, do NOT apply it yet
+            offset_data = struct.unpack('<3f', file.read(12))
+            pkg_offset = helper.convert_vecspace_to_blender(offset_data)
+            if pkg_version_id == 3 and file_length > 12: file.seek(file_length - 12, 1)
         elif file_name == "xrefs":
-            read_xrefs(file)
+            read_xrefs(file, root_ob, pkg_collection, xref_handling_mode, filepath, context)
         else:
-            # assume geometry
-            # NEW: capture the returned object and add it to our list
-            new_obj = read_geometry_file(file, file_name)
-            if new_obj is not None:
-                imported_objects.append(new_obj)
+            # Load Geometry first, pass root_ob for parenting
+            new_obj = read_geometry_file(file, file_name, root_ob, pkg_collection)
+            if new_obj is not None: imported_objects.append(new_obj)
 
-    # END READ PKG FILE DATA
-    
-    # NEW: The file reading loop is done. If we found an offset, apply it to all objects now!
-    if import_coordinate_offset and pkg_offset is not None:
-        for obj in imported_objects:
-            obj.location[0] += pkg_offset[0]
-            obj.location[1] += pkg_offset[1]
-            obj.location[2] += pkg_offset[2]
-
-    print(" done in %.4f sec." % (time.perf_counter() - time1))
     file.close()
 
+    # Place relative misc/bbnd geometry, parent to Root
+    if import_bbnd:
+        bbnd_path = extract_bbnd_file.find_bbnd(pkg_path)
+        if bbnd_path:
+            # Ensure extract_bbnd_file parents its results to root_ob as well
+            extract_bbnd_file.runs(bbnd_path, None, root_ob, pkg_collection) 
+            
+    import_misc_mtx(root_ob, pkg_collection)
 
-def load(operator,
-         context,
-         filepath="",
-         import_variants=True,
-         import_bbnd=True,
-         use_roughness_instead_of_specular_two=True,
-         import_headlights=True,
-         import_coordinate_offset=True,
-         ):
-         
+    if import_headlights:
+        # Ensure import_headlights parents its results to root_ob
+        import_helper.import_headlight_objs(filepath, root_ob, pkg_collection)
+
+    # (Final Step): Move the Master Parent Geometry to its final position
+    if import_coordinate_offset and pkg_offset is not None:
+        root_ob.location = pkg_offset
+
+    pkg_path = previous_pkg_path 
+    print(" done in %.4f sec." % (time.perf_counter() - time1))
+    return pkg_collection
+
+
+def load(operator, context, filepath="", **kwargs):
+    is_batch = kwargs.get('is_batch_mode', False)
+    
     load_pkg(filepath,
-             context,
-             import_variants,
-             import_bbnd,
-             use_roughness_instead_of_specular_two,
-             import_headlights,
-             import_coordinate_offset,
-             )
+            context,
+            import_variants=kwargs.get('import_variants', True),
+            import_bbnd=kwargs.get('import_bbnd', True),
+            use_roughness_instead_of_specular_two=kwargs.get('use_roughness_instead_of_specular_two', True),
+            import_headlights=kwargs.get('import_headlights', True),
+            import_coordinate_offset=kwargs.get('import_coordinate_offset', True),
+            batch_import_filter=kwargs.get('batch_import_filter', 'NONE'),
+            xref_handling_mode=kwargs.get('xref_handling_mode', 'EMPTYS'),
+            is_batch_mode=is_batch
+            )
 
     return {'FINISHED'}

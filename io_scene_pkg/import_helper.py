@@ -233,6 +233,7 @@ def populate_material(mtl=None, shader=None, pkg_path="", use_roughness_instead=
     mtl.name = texture_name
     
 def import_headlight_objs(filepath, root_parent_obj=None, target_collection=None):
+
     """
     Finds and imports HEADLIGHT / HLIGHT (with optional GLOW) .mtx files that 
     strictly match the base name of the given filepath. 
@@ -317,3 +318,72 @@ def import_headlight_objs(filepath, root_parent_obj=None, target_collection=None
             obj.parent = root_parent_obj
         
         print(f"Imported custom HLIGHT file: {mtx_path} as '{obj_name}'")
+
+def get_lod_info(name):
+    """
+    Returns 1=VL, 2=L, 3=M, 4=H, 5=None (No LOD suffix)
+    """
+    lower_name = name.lower()
+    
+    # 1. Handle exact matches for standalone LODs (H, M, L, VL)
+    if lower_name == 'vl':
+        return "__MAIN__", 1
+    elif lower_name == 'l':
+        return "__MAIN__", 2
+    elif lower_name == 'm':
+        return "__MAIN__", 3
+    elif lower_name == 'h':
+        return "__MAIN__", 4
+        
+    # 2. Handle standard suffix matches (e.g., BREAK01_H)
+    if lower_name.endswith('_vl'):
+        return name[:-3], 1
+    elif lower_name.endswith('_l'):
+        return name[:-2], 2
+    elif lower_name.endswith('_m'):
+        return name[:-2], 3
+    elif lower_name.endswith('_h'):
+        return name[:-2], 4
+    
+    return name, 5 #for misc geometry like BOUND (bbnd)
+
+
+def pre_scan_highest_lods(filepath, pkg_size):
+    """
+    Prescans PKG3 files using block lengths
+    Returns a set of allowed file_names, or None if the file is PKG2
+    """
+    allowed_meshes = set()
+    lod_tracker = {} # base_name_lower -> (highest_lod_val, exact_file_name)
+    
+    with open(filepath, 'rb') as f:
+        version = f.read(4).decode("utf-8", errors="ignore")
+        if version != "PKG3":
+            return None # Cannot fast-forward PKG2 easily, fallback to post-deletion
+        
+        while f.tell() < pkg_size:
+            header = f.read(4).decode("utf-8", errors="ignore")
+            if header != "FILE": break
+            
+            file_name = bin.read_angel_string(f)
+            file_length = struct.unpack('L', f.read(4))[0]
+            
+            if file_name not in ["shaders", "offset", "xrefs"]:
+                base_name, lod_val = get_lod_info(file_name)
+                
+                if lod_val < 5:
+                    base_lower = base_name.lower()
+                    # If we haven't seen this base name, or this LOD is higher than the previous best:
+                    if base_lower not in lod_tracker or lod_val > lod_tracker[base_lower][0]:
+                        lod_tracker[base_lower] = (lod_val, file_name)
+                else:
+                    allowed_meshes.add(file_name)# Not an LOD 
+                    
+            # Instantly leap over the file block's data payload
+            if file_length > 0:
+                f.seek(file_length, 1)
+                
+    for base, (val, best_file_name) in lod_tracker.items():
+        allowed_meshes.add(best_file_name)
+        
+    return allowed_meshes

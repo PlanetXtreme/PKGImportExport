@@ -69,9 +69,9 @@ class ImportPKG(bpy.types.Operator, ImportHelper):
     bl_idname = "import_scene.pkg"
     bl_label = 'Import PKG'
     bl_options = {'UNDO'}
-
     filename_ext = ".pkg"
     filter_glob: StringProperty(default="*.pkg", options={'HIDDEN'})
+
     files: CollectionProperty(
         name="File Path",
         type=bpy.types.OperatorFileListElement,
@@ -80,12 +80,11 @@ class ImportPKG(bpy.types.Operator, ImportHelper):
         subtype='DIR_PATH',
     )
 
-    import_variants: BoolProperty(
+    import_lods: BoolProperty(
         name="Import LOD Variants",
-        description="PKG files can contain High, Medium, Low, VeryLow variants. If unselected, only imports High variant.",
-        default=user_settings.get("import_variants", True),
+        description="PKG files can contain High, Medium, Low, and VeryLow mesh variants. If unselected, only imports High variant.",
+        default=user_settings.get("import_lods", True),
         )
-
     import_bbnd: BoolProperty(
         name="Import bbnd/bnd",
         description="Import boundary box object in ../bound as mesh",
@@ -131,42 +130,35 @@ class ImportPKG(bpy.types.Operator, ImportHelper):
             
             ('SKIP_SP', 
              "Skip xrefs (sp_*)", 
-             "Skips filenames starting with 'sp_'. These are xref (references) in MCSR."),
+             "Skips filenames starting with 'sp_'. These are most xrefs (references) in MCSR."),
             
             ('SKIP_UNP', 
              "Skip Unpositioned Files (0,0,0)", 
-             "Strictest filter. Skips all files with 0,0,0 coordinate data (cehicles, UI, props) in pkg file footer. Recommended for entire-map imports.")
+             "Skips all files with 0,0,0 coordinate data (cehicles, UI, props) in pkg file footer. Recommended for entire-map imports."),
+
+            ('SKIP_POS', 
+             "Skip Positioned Files (Anything NOT 0,0,0)", 
+             "Use case? Finding that aircraft carrier ship file. WHAT IS IT NAMED??"),
         ],
         default='NONE'
     )
 
-    #what I gotta change
-    #1: check if filename has sp_ to skip if SKIP_SP is chosen
-    #2: Check coordinate data of pkg FIRST (0,0,0) [file footer] to check if skip is necessary
-    #   Only do this IF SKIP_UNP is selected
-    #3: make "Batch filer" NONE if only one file is selected
-    #4: force all objects to load geometry first, at 0,0,0 position regardless.
-    #   Place the emptys as normal, except after placing, parent them to loaded geometry.
-    #   Then place relative bbnd + headlights geometry. Then parent to original imported geo file (from pkg)
-    #   Finally, if there is position data on that geometry file, move that parent geo to its position.
-
-    #5: Secondary step for emptys:
-            #realize references (GEOMETRY-choice)
-            #delete emptys (SKIP-choice)
-            #import each reference only once, and re-use its blender data [efficient for batching]
-    
-    #6: place imported objects into collection, if collection is selected
-
+    import_variants: BoolProperty(
+        name="Import MM Variants",
+        description="Variants are only applicable to Midtown Madness materials (multi-color options). Import?",
+        default=user_settings.get("import_variants", True),
+        )
 
     def execute(self, context):
         save_settings({
-            "import_variants": self.import_variants,
+            "import_lods": self.import_lods,
             "import_bbnd": self.import_bbnd,
             "use_roughness_instead_of_specular_two": self.use_roughness_instead_of_specular_two,
             "import_headlights": self.import_headlights,
             "import_coordinate_offset": self.import_coordinate_offset,
             "batch_import_filter": self.batch_import_filter,
             "xref_handling_mode": self.xref_handling_mode,
+            "import_variants": self.import_variants,
         })
 
         from . import import_pkg
@@ -203,15 +195,108 @@ class ImportBBND(bpy.types.Operator, ImportHelper):
     """Import the bbnd file format (.bbnd)"""
     bl_idname = "import_scene.bbnd"
     bl_label = 'Import BBND'
-    bl_options = {'UNDO'}
-
+    bl_options = {'UNDO'} 
     filename_ext = ".bbnd"
     filter_glob: StringProperty(default="*.bbnd;*.bnd", options={'HIDDEN'},)
-        
+
+    files: CollectionProperty(
+        name="File Path",
+        type=bpy.types.OperatorFileListElement,
+    )
+    directory: StringProperty(
+        subtype='DIR_PATH',
+    )
+
     def execute(self, context):
         from . import import_bbnd
 
-        return import_bbnd.runs(self, context)
+        keywords = self.as_keywords(ignore=("axis_forward",
+                                            "axis_up",
+                                            "filter_glob",
+                                            "check_existing",
+                                            "filepath",
+                                            "files",
+                                            "directory"
+                                            ))
+        if self.files:
+            for file_elem in self.files:
+                full_filepath = os.path.join(self.directory, file_elem.name)
+            
+                import_bbnd.runs(self, context, filepath=full_filepath, **keywords)
+
+        return {'FINISHED'}
+
+class ImportINST(bpy.types.Operator, ImportHelper):
+    """Import the inst file format (.inst) [BUGGY]"""
+    bl_idname = "import_scene.inst"
+    bl_label = 'Import .Inst'
+    bl_options = {'UNDO'}
+
+    filename_ext = ".inst"
+    filter_glob: StringProperty(default="*.inst", options={'HIDDEN'},)
+        
+    def execute(self, context):
+        from . import import_inst
+
+        return import_inst.runs(self.filepath, context)
+
+class ImportPSDL(bpy.types.Operator, ImportHelper):
+    """Import the psd1 file format (.psdl) [BUGGY]"""
+    bl_idname = "import_scene.psdl"
+    bl_label = 'Import .psdl'
+    bl_options = {'UNDO'}
+    filename_ext = ".inst"
+    filter_glob: StringProperty(default="*.psdl", options={'HIDDEN'},)
+        
+    files: CollectionProperty(
+        name="File Path",
+        type=bpy.types.OperatorFileListElement,
+    )
+    directory: StringProperty(
+        subtype='DIR_PATH',
+    )
+
+    setting_one: BoolProperty(
+        name="SETTINGS ONE",
+        description="",
+        default=user_settings.get("setting_one", True),
+        )    
+
+    setting_two: EnumProperty(
+        name="SETTINGS TWO",
+        description="",
+        items=[
+            ('OPTIONONE', "Name", "Desc"),
+            ('OPTIONTWO', "Name", "Desc"),
+        ],
+        default='OPTIONONE' 
+    )
+
+    def execute(self, context):
+        save_settings({
+            "setting_one": self.setting_one,
+            "setting_two": self.setting_two,
+        })
+
+        from . import import_psdl
+        keywords = self.as_keywords(ignore=("axis_forward",
+                                            "axis_up",
+                                            "filter_glob",
+                                            "check_existing",
+                                            "filepath",
+                                            "files",
+                                            "directory"
+                                            ))
+        if self.files:
+            for file_elem in self.files:
+                full_filepath = os.path.join(self.directory, file_elem.name)
+            
+                import_psdl.runs(self, context, filepath=full_filepath, **keywords)
+
+        return {'FINISHED'}
+
+
+
 
 class ExportPKG(bpy.types.Operator, ExportHelper):
     """Export to PKG file format (.PKG)"""
@@ -274,9 +359,9 @@ class ExportPKG(bpy.types.Operator, ExportHelper):
             "e_vertexcolors": self.e_vertexcolors,
             "e_vertexcolors_s": self.e_vertexcolors_s,
             "apply_modifiers": self.apply_modifiers,
-            "apply_modifiers": self.apply_modifiers,
             "export_headlights": self.export_headlights,
         })
+
 
         from . import export_pkg
         
@@ -301,22 +386,42 @@ class ExportBBND(bpy.types.Operator, ExportHelper):
                                     
         return export_bbnd.save(self, context)
 
+class ExportINST(bpy.types.Operator, ImportHelper):
+    """Export selected objects into .inst"""
+    bl_idname = "export_scene.inst"
+    bl_label = 'Export .inst'
+    bl_options = {'UNDO'}
+
+    filename_ext = ".inst"
+    filter_glob: StringProperty(default="*.inst", options={'HIDDEN'},)
+        
+    def execute(self, context):
+        from . import export_inst
+
+        return export_inst.runs(self.filepath, context)
 
 # Adds to menu
-def menu_func_export(self, context):
-    self.layout.operator(ExportPKG.bl_idname,  text="Angel Studios ModPackage  (.pkg)")
-    self.layout.operator(ExportBBND.bl_idname, text="Angel Studios BoxBoundary (.bbnd)")
-
 def menu_func_import(self, context):
     self.layout.operator(ImportPKG.bl_idname,  text="Angel Studios ModPackage  (.pkg)")
     self.layout.operator(ImportBBND.bl_idname, text="Angel Studios BoxBoundary (.bbnd)")
+    self.layout.operator(ImportPSDL.bl_idname, text="Angel Studios psdl        (.psdl)")
+    #self.layout.operator(ImportINST.bl_idname, text="Angel Studios sp_stop_f   (.inst)")
+
+def menu_func_export(self, context):
+    self.layout.operator(ExportPKG.bl_idname,  text="Angel Studios ModPackage  (.pkg)")
+    self.layout.operator(ExportBBND.bl_idname, text="Angel Studios BoxBoundary (.bbnd)")
+    #self.layout.operator(ExportINST.bl_idname, text="Angel Studios sp_stop_f   (.inst)")
+
 
 # Register factories
 classes = (
     ImportPKG,
     ImportBBND,
+    ImportPSDL,
+    #ImportINST,
     ExportPKG,
     ExportBBND,
+    #ExportINST,
 )
 
 def register():
@@ -357,3 +462,96 @@ def unregister():
 
 if __name__ == "__main__":
     register()
+
+
+
+#file formats to understand/know
+
+#          PLAINTEXT
+#          PLAINTEXT
+#/anim
+#    .mod  (model data for pedestrians)
+#    .rays (likely look-at info)
+#    .skel (rig)
+#/city
+#    .aimap   (related to vehicle/ped spawning for specific map config)
+#    .reset   (player respawn point)
+#    .sky     (global lighting rule)
+#    .water   (global water height?)
+#    _lighting.csv
+#/city/m01 /city/l01
+#    facades.csv
+#    lighting.csv
+#    propdefs.csv
+#    proprules.csv
+#/citylights
+#    .lmp      (lamp)
+#/frontend
+#    .htm      (a version of old html)
+#    .txt      (vehicles, waypoint races)
+#/frontend
+#    all       (no extension, just all - a list of all items, not called)
+#/race/l01 /race/m01
+#    .aimap    (describes spawned va vehicles, pedestrians)
+#    .aimap_p  (describes spawned va vehicles, pedestrians for 2P mode)
+#    .ctf      (ctf settings)
+#    .opp      (opponent coordinates to drive to)
+#tune
+#    .cltLightData       (light data)
+#    .cltLightManager    (light data)
+#    .movie              (gif rate)
+#    .ptxGlassBirthRules (emitter rules)
+#    .FXWATERSPOUT       (emitter rules)
+#    .asBirthRule        (emitted particle rules)
+#    .cinfo              (outdated, unused info file)
+#tune/camera
+#    .camTrackCS    (player vehicle camera rules)
+#    .camPovCS      (player vehicle camera rule, POV)
+#tune/hud
+#    .hud           (hud positioning data)
+#tune/banger
+#    .dgBangerData  (sim data related to rigid body objects)
+#tune/vehicle
+#    .asNode        (unknown, probably outdated)
+#    .aiVehicleData (simulation params; weight, friction etc)
+#    .vehCarDamage  (visual + gameplay params for vehicle damage)
+#    .vehCarSim     (simulation params for vehicle engine; horsepower, center of gravity, etc)
+#    .vehGyro       (camera-related info for orbital camera)
+#    .vehStuck      (how long to wait until vehicle flips upright, and related params)
+
+
+#          CAN READ (JAILBROKEN)
+#          CAN READ (JAILBROKEN)
+#/city
+#    .inst (low-end)
+#    .
+#/audvag
+#    .VAG (audio, looped)
+#/bound
+#    .bbnd  (boundary file)
+#/geometry
+#    .csv (random non-read data)
+#    .pkg (fully jailbroken thanks to racingfreak + others)
+#    .mtx (material that is tied to pkg)
+#/texture
+#    .tex (xnconvert readable texture)
+
+
+#          NEEDS JAILBREAK
+#          NEEDS JAILBREAK
+#/anim
+#    .anim
+#    .shaders
+#/bound
+#    .ter     (related to .bbnd)
+#/city   
+#    .bai     (boundary AI)
+#    .inst    (sp references)
+#    .cpvs    (?)
+#    .psdl    (map file - semi-solved, but not really)
+#/city/m01 /city/l01
+#    .pathset (props, decals)
+#/fonts
+#    .strtbl  (in-sim textual content [AKA 'non-htm' text: Cutscenes, "next race", etc])
+#/race/l01 /race/m01
+#    .short   (shortcut routes? Unsure)

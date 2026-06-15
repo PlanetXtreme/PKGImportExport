@@ -134,5 +134,5 @@ def find_bbnd(pkg_path):
                 print("FOUND MATCH:", f)
                 return str(f)
 
-    print("NO MATCH FOUND")
+    print(f"    NO BBND MATCH FOUND for {pkg_path}")
     return None

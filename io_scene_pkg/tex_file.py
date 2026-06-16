@@ -3,7 +3,7 @@
 # This program is licensed under Creative Commons BY-NC-SA:
 # https://creativecommons.org/licenses/by-nc-sa/3.0/
 #
-# Created by Dummiesman, 2016-2020
+# Created by Dummiesman, 2016-2020 (2026 edit by Planet Xtreme for MCSR Opacity flags in 2026)
 #
 # ##### END LICENSE BLOCK #####
 
@@ -22,9 +22,19 @@ class TEXType(IntEnum):
     RGB8888 = 18
     
 class TEXFile:
-    def to_blender_image(self, name= 'tex_image', pack = True):
-        im = bpy.data.images.new(name=name, width=self.width, height=self.height, alpha=self.is_alpha_format())
+    def to_blender_image(self, name='tex_image', pack=True):
+        has_alpha = self.has_alpha_channel()
+        is_emission = self.is_emission_mask()
+        
+        im = bpy.data.images.new(name=name, width=self.width, height=self.height, alpha=has_alpha)
+        
+        # --- THE MAGIC TRICK ---
+        # We attach a custom property directly to the Blender Image object.
+        # This travels back up the chain to your material script automatically!
+        im['is_emission_mask'] = is_emission
+        
         pixels = list(im.pixels)
+        max_alpha = 0.0
         
         for y in range(self.height):
             for x in range(self.width):
@@ -35,7 +45,21 @@ class TEXFile:
                 pixels[b_pixel_index] = pixel_color[0]
                 pixels[b_pixel_index+1] = pixel_color[1]
                 pixels[b_pixel_index+2] = pixel_color[2]
-                pixels[b_pixel_index+3] = pixel_color[3]
+                
+                # We PRESERVE the alpha channel so the shader can use it!
+                alpha = pixel_color[3] if has_alpha else 1.0
+                pixels[b_pixel_index+3] = alpha
+                
+                if alpha > max_alpha:
+                    max_alpha = alpha
+                    
+        # 100% Transparent Bug Fix
+        # ONLY apply this if the texture is supposed to be ACTUAL transparency!
+        # (If it's an emission mask, a 0.0 alpha just means "no glowing parts", which is correct)
+        if has_alpha and not is_emission and max_alpha == 0.0:
+            print(f"[{name}] Detected as 100% transparent! Forcing to fully opaque.")
+            for i in range(3, len(pixels), 4):
+                pixels[i] = 1.0
     
         im.pixels = pixels[:]
         im.update()
@@ -44,6 +68,15 @@ class TEXFile:
             im.pack()
             
         return im
+
+    def has_alpha_channel(self):
+        return self.format != TEXType.P8 and self.format != TEXType.P4 and self.format != TEXType.RGB888
+
+    def is_emission_mask(self):
+        # If the format natively has an alpha channel, BUT the engine flags it as Opaque
+        # (Bits 4 or 8), we know the alpha channel is actually an auxiliary Emission Mask!
+        return self.has_alpha_channel() and bool(self.flags & 12)
+        
         
     def __read_palette(self, file, color_count):
         for x in range(color_count):
@@ -61,35 +94,30 @@ class TEXFile:
     def is_paletted_format(self):
         return self.format != TEXType.RGB888 and self.format != TEXType.RGB8888 and self.format != TEXType.A1R5G5B5
         
-    def is_alpha_format(self):
-        return self.format != TEXType.P8 and self.format != TEXType.P4 and self.format != TEXType.RGB888
-    
     def is_valid(self):
         return self.width != 0 and self.height != 0 and len(self.mipmaps) > 0
         
     def get_stride(self):
-        strides = (0, 
-                   1, 
-                   2, 
-                   None, 
-                   None, 
-                   None, 
-                   2, 
-                   None, 
-                   None, 
-                   None, 
-                   None, 
-                   None, 
-                   None, 
-                   None,
-                   1, 
-                   -2, 
-                   -2,
-                   3,
-                   4
-                  )
-                              
-        
+        strides = (
+            0, 
+            1, 
+            2, 
+            None, 
+            None, 
+            None, 
+            2, 
+            None,
+            None, 
+            None, 
+            None,
+            None, 
+            None, 
+            None, 
+            1, 
+            -2, 
+            -2, 
+            3, 
+            4)
         fmt_int = int(self.format)
         if fmt_int >= 0 and fmt_int <= 18:
             return strides[fmt_int]
@@ -101,7 +129,7 @@ class TEXFile:
         if mipIndex < 0:
             raise Exception("mipIndex must not be < 0")
 
-        mip = 0;
+        mip = 0
         width = self.width
         height = self.height
         while mip != mipIndex:
@@ -115,7 +143,7 @@ class TEXFile:
         size = self.calculate_mip_size(mipIndex)
         stride = self.get_stride()
         retval = (size[0] * size[1]) // -stride if stride < 0 else (size[0] * size[1]) * stride
-        return retval;
+        return retval
     
     def __get_pixel_pa4_p4(self, x, y, stride, mip_data, mip_size, data_index):
         nibbles = mip_data[data_index]
@@ -166,28 +194,26 @@ class TEXFile:
         
         data_index =  (x * stride) + (y * (mip_size[0] * stride)) if stride > 0 else (x // -stride) + (y * (mip_size[0] // -stride))
 
-        get_pixel_functions = (None, 
-                               self.__get_pixel_pa8_p8, 
-                               self.__get_pixel_p8a8, 
-                               None, 
-                               None, 
-                               None, 
-                               self.__get_pixel_a1r5g5b5, 
-                               None, 
-                               None, 
-                               None, 
-                               None, 
-                               None, 
-                               None, 
-                               None,
-                               self.__get_pixel_pa8_p8, 
-                               self.__get_pixel_pa4_p4, 
-                               self.__get_pixel_pa4_p4,
-                               self.__get_pixel_rgb888,
-                               self.__get_pixel_rgb8888
-                              )
+        get_pixel_functions = (
+            None, 
+            self.__get_pixel_pa8_p8, 
+            self.__get_pixel_p8a8, 
+            None, 
+            None, 
+            None,         
+            self.__get_pixel_a1r5g5b5, 
+            None, 
+            None, 
+            None,
+            None, 
+            None, 
+            None, 
+            None,
+            self.__get_pixel_pa8_p8, self.__get_pixel_pa4_p4, 
+            self.__get_pixel_pa4_p4,
+            self.__get_pixel_rgb888, 
+            self.__get_pixel_rgb8888)
 
-            
         fmt_int = int(self.format)
         if fmt_int >= 0 and fmt_int <= 18:
             return get_pixel_functions[fmt_int](x, y, stride, mip_data, mip_size, data_index)
@@ -203,7 +229,7 @@ class TEXFile:
         self.height = height
         self.format = TEXType(format)
         
-        mipcount, garbage, flags = struct.unpack('<HHL', file.read(8))
+        mipcount, garbage, self.flags = struct.unpack('<HHL', file.read(8))
         
         # read palette if paletted format
         if self.format == TEXType.P4 or self.format == TEXType.PA4:
@@ -211,8 +237,8 @@ class TEXFile:
         elif self.format == TEXType.P8A8 or self.format == TEXType.PA8 or self.format == TEXType.P8:
             self.__read_palette(file, 256)
             
-        # make opaque palette if format doesn't support alpha
-        if self.format == TEXType.P8 or self.format == TEXType.P4:
+        #alpha format check fix (byte 10)
+        if not self.has_alpha_channel() and self.is_paletted_format():
             self.__make_palette_opaque()
          
         # read mips
@@ -228,6 +254,7 @@ class TEXFile:
         self.width = 0
         self.height = 0
         self.format = TEXType.RGB8888
+        self.flags = 0 # Initialize flags
         self.mipmaps = []
         
         if filepath is not None:

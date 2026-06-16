@@ -128,7 +128,6 @@ def read_vertex_data(file, FVF_FLAGS, compressed):
 
 def populate_material(mtl=None, shader=None, pkg_path="", use_roughness_instead=True):
     """ Initializes a material """
-    #print(f"use_roughness_instead_of_specular is {use_roughness_instead}")
     # get addon settings
     preferences = bpy.context.preferences
     addon_prefs = preferences.addons[__package__].preferences    
@@ -144,6 +143,7 @@ def populate_material(mtl=None, shader=None, pkg_path="", use_roughness_instead=
     bsdf = mtl.node_tree.nodes["Principled BSDF"]
     bsdf.inputs['Base Color'].default_value = shader.diffuse_color
     bsdf.inputs['Emission Color'].default_value = shader.emissive_color
+    bsdf.location = mathutils.Vector((-100.0, 120.0))
 
     if use_roughness_instead:
         # Invert shininess back to roughness (Shininess 1.0 -> Roughness 0.0)
@@ -163,22 +163,23 @@ def populate_material(mtl=None, shader=None, pkg_path="", use_roughness_instead=
     # alpha vars
     mtl_alpha = shader.diffuse_color[3]
     tex_depth = 0
-        
+
     # look for a texture
     tex_result = None
     tex_image_node = None
     is_substituted_tex = False
     if shader.name is not None:
         tex_result = helper.try_load_texture(texture_name, path.abspath(path.join(os.path.dirname(pkg_path), "..")))
-        
-        # debug
-        #if tex_result is not None:
-        #    print("Texture:" + texture_name + ", Path:" + tex_result.filepath_raw)
             
         # texture substitution
         if tex_result is None and addon_prefs.substitute_textures:
             tex_result = helper.make_placeholder_texture(texture_name)
             is_substituted_tex = True
+
+    # Check for our custom emission mask property on the loaded image
+    is_emission_mask = False
+    if tex_result is not None:
+        is_emission_mask = tex_result.get('is_emission_mask', False)
 
     # set up diffuse
     if tex_result is not None:
@@ -211,14 +212,45 @@ def populate_material(mtl=None, shader=None, pkg_path="", use_roughness_instead=
         blend_node.location = mathutils.Vector((-460.0, -20.0))
         
         mtl.node_tree.links.new(blend_node.inputs['Color1'], tex_image_node.outputs['Color'])
-        mtl.node_tree.links.new(bsdf.inputs['Emission Color'], blend_node.outputs['Color'])
+        
+        # Check if the material has emission data (RGB is greater than 0)
+        is_emissive_material = sum(shader.emissive_color[:3]) > 0.001
+        
+        # --- EMISSION MASK MULTIPLY ---
+        if is_emission_mask:
+            blend_node.inputs['Color2'].default_value = shader.diffuse_color # forces color to be the diffuse
+            mask_node = mtl.node_tree.nodes.new('ShaderNodeMixRGB')
+            mask_node.blend_type = 'MULTIPLY'
+            mask_node.inputs['Fac'].default_value = 1.0
+            mask_node.label = "Apply Emission Mask"
+            mask_node.location = mathutils.Vector((-300.0, -20.0))
+            
+            # Multiply the Emissive Color by the Texture Alpha Matte
+            mtl.node_tree.links.new(mask_node.inputs['Color1'], blend_node.outputs['Color'])
+            mtl.node_tree.links.new(mask_node.inputs['Color2'], tex_image_node.outputs['Alpha'])
+            mtl.node_tree.links.new(bsdf.inputs['Emission Color'], mask_node.outputs['Color'])
+            
+        else:
+            # If there is NO emission mask, but the shader IS emissive
+            # force Color2 to match the diffuse color
+            if is_emissive_material:
+                blend_node.inputs['Color2'].default_value = shader.diffuse_color
+                
+            mtl.node_tree.links.new(bsdf.inputs['Emission Color'], blend_node.outputs['Color'])
      
+        bsdf.inputs['Emission Strength'].default_value = 1.0
+
     # have alpha?
+    # If the texture is an emission mask, it is NOT transparent. We force the depth check to pass.
+    if is_emission_mask:
+        tex_depth = 24 
+        
     if mtl_alpha < 1 or tex_depth == 32:
         mtl.blend_method = 'HASHED' if addon_prefs.use_alpha_hash else 'BLEND'
         
     # assign transparent channel on BSDF
-    if tex_image_node is not None:
+    # We DO NOT link the texture alpha to transparency if it's an emission mask!
+    if tex_image_node is not None and not is_emission_mask:
         blend_node = mtl.node_tree.nodes.new('ShaderNodeMath')
         blend_node.inputs[0].default_value = mtl_alpha
         blend_node.operation = 'MULTIPLY'

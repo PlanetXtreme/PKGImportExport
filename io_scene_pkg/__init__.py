@@ -113,11 +113,12 @@ class ImportPKG(bpy.types.Operator, ImportHelper):
         name="Child xrefs",
         description="How are xrefs handled during import    ",
         items=[
-            ('EMPTYS', "Import as Emptys (Export-Safest)", "Creates Blender Emptys to maintain the link to the external file. Recommended if planning to export."),
-            ('GEOMETRY', "Import as Geometry", "Attempts to replace each xref object with the reference .pkg file."),
-            ('SKIP', "Skip xrefs Entirely", "Ignores all xref importing.")
+            ('EMPTYS', "Emptys", "Creates Blender Emptys @ listed rot + pos, best for fast-viewport performance."),
+            ('INSTANCED', "Instanced Geometry", "Attempts to replace each xref object with an instance for performance + visibility."),
+            ('GEOMETRY', "Raw Geometry", "Attempts to replace each xref object with raw geometry - Expect poorest viewport performance."),
+            ('SKIP', "Skip", "Ignores all xref importing.")
         ],
-        default='EMPTYS' #name the "geometry" objects that are imported as the same name as the reference xref object so exporting can still preserve data
+        default='INSTANCED'
     )
 
     batch_import_filter: EnumProperty(
@@ -130,7 +131,7 @@ class ImportPKG(bpy.types.Operator, ImportHelper):
             
             ('SKIP_SP', 
              "Skip xrefs (sp_*)", 
-             "Skips filenames starting with 'sp_'. These are most xrefs (references) in MCSR."),
+             "Skips selected filenames starting with 'sp_'. These are most xrefs (references) in MCSR."),
             
             ('SKIP_UNP', 
              "Skip Unpositioned Files (0,0,0)", 

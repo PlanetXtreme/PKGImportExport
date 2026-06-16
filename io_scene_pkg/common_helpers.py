@@ -73,6 +73,8 @@ def load_texture_from_path(file_path, use_placeholder_if_missing=True):
         if tf.is_valid():
             tf_img = tf.to_blender_image(imgname)
             tf_img.filepath_raw = file_path # set filepath manually for TEX stuff, since we make it ourself
+
+
             return tf_img
         else:
             print("Invalid TEX file: " + file_path)
@@ -95,7 +97,7 @@ def try_load_texture(tex_name, search_path):
         if tf_img is not None:
             return tf_img
     
-    standard_extensions = (".tga", ".bmp", ".png")
+    standard_extensions = (".tga", ".bmp", ".png", ".jpg") #jpg can be supported with cheats, but still isn't fully supported as of 06/2026
     for ext in standard_extensions:
         find_file = tex_name + ext
         found_file = find_file_with_game_fallback(find_file, search_path, "texture")

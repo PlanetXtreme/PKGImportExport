@@ -203,8 +203,8 @@ def read_xrefs(file, root_parent_obj, collection, xref_handling_mode, parent_fil
         ob.parent = root_parent_obj 
         collection.objects.link(ob) 
         
-        if xref_handling_mode == 'GEOMETRY':
-            
+        if xref_handling_mode in {'INSTANCED', 'GEOMETRY'}:
+                    
             # SAFE CACHE CHECK: Ensure the cache exists AND the Blender data hasn't been deleted
             is_cached_and_alive = False
             if xref_name in XREF_CACHE:
@@ -254,8 +254,42 @@ def read_xrefs(file, root_parent_obj, collection, xref_handling_mode, parent_fil
             # 4. Apply to Empty
             cached_col = XREF_CACHE.get(xref_name)
             if cached_col is not None:
-                ob.instance_type = 'COLLECTION'
-                ob.instance_collection = cached_col
+                if xref_handling_mode == 'INSTANCED':
+                    # Create a Collection Instance
+                    ob.instance_type = 'COLLECTION'
+                    ob.instance_collection = cached_col
+                    
+                elif xref_handling_mode == 'GEOMETRY':
+                    # Create actual editable geometry in the scene
+                    old_to_new = {}
+                    
+                    for src_obj in cached_col.objects:
+                        new_obj = src_obj.copy()
+                        
+                        # NOTE: By default, .copy() shares Mesh Data (like pressing Alt+D) to save memory.
+                        # If you want 100% unique, unlinked mesh data (like pressing Shift+D), uncomment the next 2 lines:
+                        # if new_obj.data is not None:
+                        #     new_obj.data = new_obj.data.copy()
+                        
+                        old_to_new[src_obj] = new_obj
+                        
+                        # Link the new object to the exact same collection(s) as the Empty 'ob'
+                        if ob.users_collection:
+                            for col in ob.users_collection:
+                                col.objects.link(new_obj)
+                        else:
+                            context.collection.objects.link(new_obj)
+                            
+                    # Rebuild the object hierarchy 
+                    for src_obj, new_obj in old_to_new.items():
+                        if src_obj.parent in old_to_new:
+                            # Inner xref hierarchy: parent to the duplicated parent
+                            new_obj.parent = old_to_new[src_obj.parent]
+                            new_obj.matrix_parent_inverse = src_obj.matrix_parent_inverse
+                        else:
+                            # Root objects of the XREF: Parent them to the main Empty locator
+                            new_obj.parent = ob
+                            # The objects will inherit 'ob's world location/rotation automatically
 
 def read_geometry_file(file, meshname, root_parent_obj, collection):
     scn = bpy.context.scene
@@ -350,10 +384,10 @@ def read_geometry_file(file, meshname, root_parent_obj, collection):
 
             triangle_data = None
             if FLAG_compact_strips and prim_type == 4:
-             tristrip_data = struct.unpack(str(num_indices) + 'H', file.read(2 * num_indices))
-             triangle_data = import_helper.convert_triangle_strips(tristrip_data)
+                tristrip_data = struct.unpack(str(num_indices) + 'H', file.read(2 * num_indices))
+                triangle_data = import_helper.convert_triangle_strips(tristrip_data)
             else:
-             triangle_data = struct.unpack(str(num_indices) + 'H', file.read(2 * num_indices))
+                triangle_data = struct.unpack(str(num_indices) + 'H', file.read(2 * num_indices))
 
             for i in range(0, len(triangle_data), 3):
                 tri_indices = triangle_data[i:i+3]
@@ -529,7 +563,7 @@ def load_pkg(
 
     file.close()
 
-    # --- 3. LOD FILTERING FALLBACK (PKG2 ONLY) ---
+    # --- LOD FILTERING FALLBACK (PKG2 ONLY) ---
     if not import_lods and allowed_meshes is None:
         print(f"is PKG2 file")
         lod_groups = {}

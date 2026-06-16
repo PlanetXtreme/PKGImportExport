@@ -14,13 +14,10 @@ Requirements
 
 Importing
   Textures
-    Textures with the format BMP,TGA,TEX will be imported when importing .pkg files
+    Textures with the format BMP,TGA,TEX,JPG will be imported when importing .pkg files
 
   MTX Files
     MTX files will automatically be imported if found
-
-  Geometry Flags
-    Because geometry flags are done via geometry, and not via material. These are NOT imported.
 
 Exporting
   Reflections
@@ -31,9 +28,6 @@ Exporting
 
   Materials Extra
     If you want a solid color material, use a Principled BSDF and set the base color. This can make texturing solid colors (like the bottom of cars) easier.
-
-  Textures
-    The exporter will try and find the texture by searching the node tree. If it can't find the texture, or it's otherwise not assigned, the material will export untextured.
 
   XRefs
     To define an xref, simply name an empty object "xref:xrefname". Where xrefname is the name of the PKG file to xref e.g. "sp_parkmtr_f". It does not matter if Blender adds the .001 and so on.

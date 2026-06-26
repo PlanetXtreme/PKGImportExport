@@ -91,11 +91,11 @@ def fast_scan_for_skip(filepath, filter_mode):
             
     return False
 
-def read_shaders_file(file, length, offset, import_variants, use_roughness_instead_of_specular_two):
+def read_shaders_file(file, length, offset, use_roughness_instead_of_specular_two):
     # get custom stuff
 
     scene = bpy.context.scene
-    angel = scene.angel
+    angel = getattr(scene, "angel", None)
     
     # read shader set
     shader_set = ShaderSet(file)
@@ -118,55 +118,8 @@ def read_shaders_file(file, length, offset, import_variants, use_roughness_inste
             base_material_set.append(mtl)
         else:
             base_material_set.append(None) # SHOULD NOT HAPPEN!
-    
-    # don't set up variants if the import flag isn't set 
-    if not import_variants:
-        return
-        
-    # clear existing variant stuff
-    angel.clear()
-    
-    # find what materials are equal across the board
-    # this will give us the ability of quickly checking if variants are unique
-    # but also a reference point for variant 0
-    variant_similarities = [0] * num_shaders_per_variant
-    for i in range(num_variants - 1, 0, -1):
-        variant_ref = shader_set.variants[i]
-        variant_prev = shader_set.variants[i-1]
-        for j in range(num_shaders_per_variant):
-            if variant_ref[j] == variant_prev[j]:
-                variant_similarities[j] += 1
-   
-    # setup variants
-    for variant_num  in range(num_variants):
-        tool_variant = angel.variants.add() # add to our tool
-        variant = shader_set.variants[variant_num]
-        for shader_num in range(num_shaders_per_variant):
-            shader = variant[shader_num]
-            
-            # check if this shader is unique to this variant
-            if variant_similarities[shader_num] == num_variants - 1:
-                continue
-            elif variant_num > 0 and shader == base_variant[shader_num]:
-                continue
-
-            # get shader base material
-            base_mtl = base_material_set[shader_num]
-            
-            # add the base material to the variant, returning the cloned, variant version
-            variant_material = tool_variant.add_material(base_mtl)
-            
-            # adjust the cloned version
-            import_helper.populate_material(variant_material.material, shader, pkg_path, use_roughness_instead_of_specular_two)
-            variant_material.material.name = helper.get_undupe_name(variant_material.material.name) + "_VARIANT" + str(variant_num)
-            
-    # apply it 
-    angel.apply_to_scene()
-    angel.selected_variant = 0
-    
-    # skip to the end of this FILE
-    file.seek(length - (file.tell() - offset), 1)
     return
+
 
 def read_xrefs(file, root_parent_obj, collection, xref_handling, parent_filepath, context):
     if xref_handling == 'SKIP':
@@ -234,7 +187,7 @@ def read_xrefs(file, root_parent_obj, collection, xref_handling, parent_filepath
                         batch_import_filter='NONE', 
                         xref_handling='EMPTYS',  
                         origin_placement='SKIP_UNRELATED',  
-                        import_variants=False,
+                        #import_variants=False,
                         is_batch_mode=False,
                         is_xref_import=True 
                     )
@@ -521,7 +474,7 @@ def load_pkg(
                 xref_handling='EMPTYS',
                 origin_placement='SKIP_UNRELATED',
                 is_batch_mode=False,
-                import_variants=True, 
+                #import_variants=True, 
                 is_xref_import=False,
             ):
 
@@ -599,7 +552,7 @@ def load_pkg(
         
         print('\t[' + str(round(time.perf_counter() - time1, 3)) + '] processing : ' + file_name)
         if file_name == "shaders":
-            read_shaders_file(file, file_length, file.tell(), import_variants, use_roughness_instead_of_specular_two)
+            read_shaders_file(file, file_length, file.tell(), use_roughness_instead_of_specular_two)
         elif file_name == "offset":
             offset_data = struct.unpack('<3f', file.read(12))
             pkg_offset = helper.convert_vecspace_to_blender(offset_data)
@@ -674,7 +627,7 @@ def load(operator, context, filepath="", **kwargs):
             batch_import_filter=kwargs.get('batch_import_filter', 'NONE'),
             xref_handling=kwargs.get('xref_handling', 'EMPTYS'),
             origin_placement=kwargs.get('origin_placement', 'SKIP_UNRELATED'),
-            import_variants=kwargs.get('import_variants', True),
+            #import_variants=kwargs.get('import_variants', True),
             is_batch_mode=is_batch
             )
 

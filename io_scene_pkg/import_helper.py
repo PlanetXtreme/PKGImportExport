@@ -130,8 +130,7 @@ def read_vertex_data(file, FVF_FLAGS, compressed):
 def populate_material(mtl=None, shader=None, pkg_path="", use_roughness_instead=True):
     """ Initializes a material by locating textures and delegating to the UI builder """
     # get addon settings
-    preferences = bpy.context.preferences
-    addon_prefs = preferences.addons[__package__].preferences    
+    preferences = bpy.context.preferences 
     
     # get tex name
     texture_name = "age:notexture" if shader.name is None else shader.name
@@ -144,7 +143,7 @@ def populate_material(mtl=None, shader=None, pkg_path="", use_roughness_instead=
         tex_result = helper.try_load_texture(texture_name, path.abspath(path.join(os.path.dirname(pkg_path), "..")))
             
         # texture substitution
-        if tex_result is None and addon_prefs.substitute_textures:
+        if tex_result is None:
             tex_result = helper.make_placeholder_texture(texture_name)
             is_substituted_tex = True
 
@@ -156,7 +155,7 @@ def populate_material(mtl=None, shader=None, pkg_path="", use_roughness_instead=
         shininess=shader.shininess,
         use_roughness_instead=use_roughness_instead,
         is_substituted_tex=is_substituted_tex,
-        use_alpha_hash=addon_prefs.use_alpha_hash,
+        use_alpha_hash=True,
         force_node_creation=False # Let it skip generating blank nodes if no texture is found
     )
         

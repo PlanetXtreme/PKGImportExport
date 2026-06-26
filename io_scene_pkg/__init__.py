@@ -18,8 +18,6 @@ bl_info = {
 
 import bpy
 import pkgimporter.variant_ui as variant_ui
-import pkgimporter.angel_scenedata as angel_scenedata
-import pkgimporter.bl_preferences as bl_preferences
 import pkgimporter.import_tex as import_tex
 import pkgimporter.material_helper_ui as material_helper_ui
 import json #for saved export/import settings :)
@@ -84,7 +82,7 @@ class ImportPSDL(bpy.types.Operator, ImportHelper):
         name="SETTINGS ONE",
         description="",
         default=user_settings.get("import_psdl_setting_one", True),
-        )    
+        )
 
     setting_two: EnumProperty(
         name="SETTINGS TWO",
@@ -93,7 +91,7 @@ class ImportPSDL(bpy.types.Operator, ImportHelper):
             ('import_psdl_opt_one', "Name", "Desc"),
             ('import_psdl_opt_two', "Name", "Desc"),
         ],
-        default=user_settings.get("import_psdl_setting_two", True),
+        default=user_settings.get("import_psdl_setting_two", "import_psdl_opt_one"),
     )
 
     def invoke(self, context, event): #memorization call
@@ -113,7 +111,7 @@ class ImportPSDL(bpy.types.Operator, ImportHelper):
         save_settings({
             "import_psdl_setting_one": self.setting_one,
             "import_psdl_setting_two": self.setting_two,
-            "path_i_psdl": self.setting_two,
+            "path_i_psdl": self.directory,
         })
 
         from . import import_psdl
@@ -238,11 +236,11 @@ class ImportPKG(bpy.types.Operator, ImportHelper):
         default=user_settings.get("import_pkg_origin_placement", 'SKIP_UNRELATED'),
     )
 
-    import_variants: BoolProperty(
-        name="Import MM Variants",
-        description="Variants are only applicable to Midtown Madness materials (multi-color options). Import?",
-        default=user_settings.get("import_pkg_variants", True),
-        )
+    #import_variants: BoolProperty(
+    #    name="Import MM Variants",
+    #    description="Variants are only applicable to Midtown Madness materials (multi-color options). Import?",
+    #    default=user_settings.get("import_pkg_variants", True),
+    #    )
 
     def invoke(self, context, event): #memorization call
         settings = load_settings()
@@ -267,7 +265,7 @@ class ImportPKG(bpy.types.Operator, ImportHelper):
             "import_pkg_batch_filter": self.batch_import_filter,
             "import_pkg_xref_handling": self.xref_handling,
             "import_pkg_origin_placement": self.origin_placement,
-            "import_pkg_variants": self.import_variants,
+            #"import_pkg_variants": self.import_variants,
             "path_i_pkg": self.directory, #path import
         })
 
@@ -871,10 +869,8 @@ classes = ( #this is the best hierarchy: PSDL, PKG, BBND, ModSkel, Anim, ...
 )
 
 def register():
-    bl_preferences.register()
     for cls in classes:
         bpy.utils.register_class(cls)
-    angel_scenedata.register()
     variant_ui.register()
     import_tex.register()
     material_helper_ui.register()
@@ -884,8 +880,6 @@ def register():
     
     bpy.types.Material.variant = bpy.props.IntProperty(name="Variant")
     bpy.types.Material.cloned_from = bpy.props.PointerProperty(name="Cloned From", type=bpy.types.Material)
-    
-    bpy.types.Scene.angel = PointerProperty(type=angel_scenedata.AngelSceneData)
 
 def unregister():
     del bpy.types.Scene.angel
@@ -898,11 +892,9 @@ def unregister():
     material_helper_ui.unregister()
     import_tex.unregister()
     variant_ui.unregister()
-    angel_scenedata.unregister()
     
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
-    bl_preferences.unregister()
     
 
 if __name__ == "__main__":

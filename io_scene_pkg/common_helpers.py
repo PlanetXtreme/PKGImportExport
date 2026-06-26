@@ -66,17 +66,6 @@ def find_file_with_game_fallback(file, search_path, subfolder=None, ignore_subdi
                 if path.isfile(check_path):
                     print("Found texture via modSkel: " + check_path)
                     return check_path
-    # 3. Then search global game dir (from addon preferences)
-    preferences = bpy.context.preferences
-    addon_prefs = preferences.addons[__package__].preferences
-    if addon_prefs.use_gamepath:
-        find_path = (path.abspath(path.join(addon_prefs.gamepath, subfolder, file)) 
-                     if subfolder is not None 
-                     else path.abspath(path.join(addon_prefs.gamepath, file)))
-        #print("find_path game:" + find_path)
-        if path.isfile(find_path):
-            return find_path
-
     return None
 
 def load_texture_from_path(file_path, use_placeholder_if_missing=True):

@@ -1,21 +1,23 @@
+# ##### BEGIN LICENSE BLOCK #####
+#
+# This program is licensed under Creative Commons BY-NC-SA:
+# https://creativecommons.org/licenses/by-nc-sa/3.0/
+#
+# Created by PlanetXtreme, 2026
+#
+# ##### END LICENSE BLOCK #####
+
 import bpy
 import struct
 import os
 import math
 from mathutils import Matrix
 from pathlib import Path
+
 def runs(operator, context, root_parent_obj=None, target_collection=None):
     FIX_COORDINATE_ROTATION = True
 
-    filepath = None
-
-    # Primary: operator.filepath
-    if hasattr(operator, "filepath"):
-        filepath = operator.filepath
-    # Fallback: operator itself might be a string path
-    elif isinstance(operator, str):
-        filepath = operator
-
+    filepath = operator.filepath if hasattr(operator, "filepath") else str(operator)
     if not filepath or not os.path.exists(filepath):
         print({'ERROR'}, f"Cannot find file at {filepath}")
         return {'CANCELLED'}
@@ -24,44 +26,39 @@ def runs(operator, context, root_parent_obj=None, target_collection=None):
         data = f.read()
 
     if len(data) < 13:
-        print({'ERROR'}, "File is too small to be a valid BBND.")
+        print("Not a real bbnd file, what...")
         return {'CANCELLED'}
 
-    # 1. Parse Header
     num_verts = struct.unpack('<I', data[1:5])[0]
+    num_groups = struct.unpack('<I', data[5:9])[0]
     num_faces = struct.unpack('<I', data[9:13])[0]
     
-    # 2. Parse Vertices
     offset = 13
     verts = []
     for _ in range(num_verts):
         verts.append(struct.unpack('<fff', data[offset:offset+12]))
         offset += 12
 
-    # 3. Parse Faces and Material Indices
-    face_block_size = num_faces * 10
-    face_offset = len(data) - face_block_size
+    mat_chunks = []
+    for _ in range(num_groups):
+        mat_chunks.append(data[offset : offset + 104])
+        offset += 104
     
     faces = []
     mat_indices = []
-    
     for _ in range(num_faces):
-        v1, v2, v3, v4, mat_id = struct.unpack('<HHHHH', data[face_offset:face_offset+10])
-        face_offset += 10
-        
+        v1, v2, v3, v4, mat_id = struct.unpack('<HHHHH', data[offset:offset+10])
+        offset += 10
         if v4 == 0:
             faces.append((v1, v2, v3))
         else:
             faces.append((v1, v2, v3, v4))
-            
         mat_indices.append(mat_id)
 
-    # 4. Build the Blender Mesh
-    mesh_name = "BOUND" #os.path.basename(filepath)
+    mesh_name = "BOUND"
     mesh = bpy.data.meshes.new(mesh_name)
     obj = bpy.data.objects.new(mesh_name, mesh)
     
-    # FIX: Link to the specific PKG collection instead of default
     if target_collection:
         target_collection.objects.link(obj)
     else:
@@ -70,38 +67,42 @@ def runs(operator, context, root_parent_obj=None, target_collection=None):
     mesh.from_pydata(verts, [], faces)
     mesh.update()
 
-    # 5. Setup Material Indices
-    if mat_indices:
-        max_mat = max(mat_indices)
-        for i in range(max_mat + 1):
-            mat = bpy.data.materials.new(name=f"{mesh_name}_Mat_{i}")
-            obj.data.materials.append(mat)
-            
-        for i, poly in enumerate(mesh.polygons):
-            poly.material_index = mat_indices[i]
-
-    # 6. Apply Coordinate Rotation Fix
-    if FIX_COORDINATE_ROTATION:
-        rot_mat = Matrix.Rotation(math.radians(90.0), 4, 'X')
-        obj.matrix_world = rot_mat @ obj.matrix_world
+    # Create Materials & Assign Custom Properties
+    for i in range(num_groups):
+        chunk = mat_chunks[i]
         
-        rot_mat = Matrix.Rotation(math.radians(180.0), 4, 'Z')
-        obj.matrix_world = rot_mat @ obj.matrix_world
+        # Extract name string from the binary
+        engine_name = chunk[0:32].split(b'\0')[0].decode('ascii', errors='ignore').strip()
+        blender_name = engine_name if engine_name else f"{mesh_name}_Mat_{i}"
+        
+        mat = bpy.data.materials.new(name=blender_name)
+        
+        # Assign Custom Properties! 
+        mat["bbnd_material_name"] = engine_name if engine_name else "default"
+        mat["bbnd_float1"] = struct.unpack('<f', chunk[32:36])[0]
+        mat["bbnd_float2"] = struct.unpack('<f', chunk[36:40])[0]
+        mat["bbnd_data_A"] = chunk[48:72].hex()
+        mat["bbnd_data_B"] = chunk[80:104].hex()
+        
+        obj.data.materials.append(mat)
+            
+    for i, poly in enumerate(mesh.polygons):
+        poly.material_index = mat_indices[i]
 
-    # Make the newly imported object the active selection
+    if FIX_COORDINATE_ROTATION:
+        obj.matrix_world = Matrix.Rotation(math.radians(90.0), 4, 'X') @ obj.matrix_world
+        obj.matrix_world = Matrix.Rotation(math.radians(180.0), 4, 'Z') @ obj.matrix_world
+
     bpy.context.view_layer.objects.active = obj
     obj.select_set(True)
-    
-    # Apply Transforms (Location, Rotation, Scale)
     bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 
-    # FIX: Parent to the Master Root Object AFTER applying transforms 
-    # so the rotation is baked safely into the vertices
     if root_parent_obj:
         obj.parent = root_parent_obj
 
     print({'INFO'}, f"Successfully imported BBND: {mesh_name}")
     return {'FINISHED'}
+
 
 def find_bbnd(pkg_path):
     pkg_path = Path(bpy.path.abspath(str(pkg_path)))
@@ -126,13 +127,13 @@ def find_bbnd(pkg_path):
         if not root.exists() or not root.is_dir():
             continue
 
-        print("CHECKING:", root)
+        for ext in (".bbnd", ".bnd"):
+            candidate = root / f"{target_base}{ext}"
+            #print("CHECKING:", candidate)
 
-        for f in root.iterdir():
-            name = f.name.lower()
-            if name == f"{target_base}.bbnd" or name == f"{target_base}.bnd":
-                print("FOUND MATCH:", f)
-                return str(f)
+            if candidate.exists():
+                #print("FOUND MATCH:", candidate)
+                return str(candidate)
 
     print(f"    NO BBND MATCH FOUND for {pkg_path}")
     return None

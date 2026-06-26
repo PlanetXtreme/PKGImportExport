@@ -1,12 +1,12 @@
 # This program is licensed under Creative Commons BY-NC-SA:
 # https://creativecommons.org/licenses/by-nc-sa/3.0/
 #
-# Created by Dummiesman, 2016-2020, edited in 2026, {ADD YEARS HERE}
+# Created by Dummiesman, 2016-2020, edited in 2026 (PX), {ADD YEARS HERE}
 
 bl_info = {
-    "name": "Angel Studios PKG Format",
-    "author": "Dummiesman, other", #edited for Blender 5.0 + MCSR compatibility by Planet Xtreme but he doesn't deserve credit, does he
-    "version": (1, 0, 3),
+    "name": "Angel Studios File Formats",
+    "author": "Dummiesman, PlanetXtreme",
+    "version": (1, 0, 4),
     "blender": (5, 1, 0),
     "location": "File > Import-Export",
     "description": "Import-Export PKG files",
@@ -64,8 +64,83 @@ from bpy_extras.io_utils import (
         ExportHelper,
         )
 
+class ImportPSDL(bpy.types.Operator, ImportHelper):
+    """ Import PSD1 file format (Midnight Club Street Racing) """
+    bl_idname = "import_scene.psdl"
+    bl_label = 'Import .psdl'
+    bl_options = {'UNDO'}
+    filename_ext = ".inst"
+    filter_glob: StringProperty(default="*.psdl", options={'HIDDEN'},)
+        
+    files: CollectionProperty(
+        name="File Path",
+        type=bpy.types.OperatorFileListElement,
+    )
+    directory: StringProperty(
+        subtype='DIR_PATH',
+    )
+
+    setting_one: BoolProperty(
+        name="SETTINGS ONE",
+        description="",
+        default=user_settings.get("import_psdl_setting_one", True),
+        )    
+
+    setting_two: EnumProperty(
+        name="SETTINGS TWO",
+        description="",
+        items=[
+            ('import_psdl_opt_one', "Name", "Desc"),
+            ('import_psdl_opt_two', "Name", "Desc"),
+        ],
+        default=user_settings.get("import_psdl_setting_two", True),
+    )
+
+    def invoke(self, context, event): #memorization call
+        settings = load_settings()
+        psdl_path = settings.get("path_i_psdl", "")
+
+        if psdl_path and os.path.exists(psdl_path):
+            if not psdl_path.endswith(os.sep) and not psdl_path.endswith(("/", "\\")):
+                psdl_path += os.sep
+            
+            self.filepath = psdl_path
+
+        return super().invoke(context, event)
+
+
+    def execute(self, context):
+        save_settings({
+            "import_psdl_setting_one": self.setting_one,
+            "import_psdl_setting_two": self.setting_two,
+            "path_i_psdl": self.setting_two,
+        })
+
+        from . import import_psdl
+        keywords = self.as_keywords(ignore=("axis_forward",
+                                            "axis_up",
+                                            "filter_glob",
+                                            "check_existing",
+                                            "filepath",
+                                            "files",
+                                            "directory"
+                                            ))
+        if self.files:
+            for file_elem in self.files:
+                full_filepath = os.path.join(self.directory, file_elem.name)
+            
+                import_psdl.runs(self, context, filepath=full_filepath, **keywords)
+
+        return {'FINISHED'}
+
+#class ImportBAI
+
+#class ImportCVPS
+
+#class ImportINST (probably road instances like trafflic lights on the PSDL)
+
 class ImportPKG(bpy.types.Operator, ImportHelper):
-    """Import from PKG file format (.pkg)"""
+    """ Import PKG File Format (MCSR and Midtown Madness) """
     bl_idname = "import_scene.pkg"
     bl_label = 'Import PKG'
     bl_options = {'UNDO'}
@@ -83,43 +158,31 @@ class ImportPKG(bpy.types.Operator, ImportHelper):
     import_lods: BoolProperty(
         name="Import LOD Variants",
         description="PKG files can contain High, Medium, Low, and VeryLow mesh variants. If unselected, only imports High variant.",
-        default=user_settings.get("import_lods", True),
+        default=user_settings.get("import_pkg_lods", True),
         )
     import_bbnd: BoolProperty(
         name="Import bbnd/bnd",
         description="Import boundary box object in ../bound as mesh",
-        default=user_settings.get("import_bbnd", True),
+        default=user_settings.get("import_pkg_bbnd", True),
         )
 
     use_roughness_instead_of_specular_two: BoolProperty(
         name="Import Materials using roughness for shininess",
         description="Reccomended to select this; If unselected, 'Specular ⌄ IOR Level' (original, outdated functionality) will determine shininess.",
-        default=user_settings.get("use_roughness_instead_of_specular_two", True),
+        default=user_settings.get("import_pkg_use_roughness_instead", True),
         )
 
     import_headlights: BoolProperty(
         name="Import headlights",
         description="If headlight MTX file(s) are found (...HLIGHTGLOW0, ...HLIGHTGLOW1.mtx), import it as geometry",
-        default=user_settings.get("import_headlights", True),
+        default=user_settings.get("import_pkg_headlights", True),
         )    
 
     import_coordinate_offset: BoolProperty(
         name="Apply Files' Coordinate offset",
         description="All MCSR pkg files have a file footer that describes the coordinates of the pkg in MCSR world space; Place object at those coordinates in Blender space?",
-        default=user_settings.get("import_coordinate_offset", True),
+        default=user_settings.get("import_pkg_coordinate_offset", True),
         )    
-
-    xref_handling_mode: EnumProperty(
-        name="Child xrefs",
-        description="How are xrefs handled during import    ",
-        items=[
-            ('EMPTYS', "Emptys", "Creates Blender Emptys @ listed rot + pos, best for fast-viewport performance."),
-            ('INSTANCED', "Instanced Geometry", "Attempts to replace each xref object with an instance for performance + visibility."),
-            ('GEOMETRY', "Raw Geometry", "Attempts to replace each xref object with raw geometry - Expect poorest viewport performance."),
-            ('SKIP', "Skip", "Ignores all xref importing.")
-        ],
-        default='INSTANCED'
-    )
 
     batch_import_filter: EnumProperty(
         name="Batch Filter",
@@ -141,25 +204,71 @@ class ImportPKG(bpy.types.Operator, ImportHelper):
              "Skip Positioned Files (Anything NOT 0,0,0)", 
              "Use case? Finding that aircraft carrier ship file. WHAT IS IT NAMED??"),
         ],
-        default='NONE'
+        default=user_settings.get("import_pkg_batch_filter", 'NONE'),
+    )
+
+    xref_handling: EnumProperty(
+        name="Child xrefs",
+        description="How are xrefs handled during import    ",
+        items=[
+            ('SKIP', "Skip", "Ignores all xref importing."),
+            ('EMPTYS', "Emptys", "Creates Blender Emptys @ listed rot + pos, best for fast-viewport performance."),
+            ('INSTANCED', "Instanced Geometry", "Attempts to replace each xref object with an instance for performance + visibility."),
+            ('GEOMETRY', "Raw Geometry", "Attempts to replace each xref object with raw geometry - Expect poorest viewport performance."),
+        ],
+        default=user_settings.get("import_pkg_xref_handling", 'INSTANCED'),
+    )
+
+    origin_placement: EnumProperty(
+        name="Origin Placement",
+        description="Apply dgBangerData Center of Gravity    ",
+        items=[
+            ('NONE', 
+             "Ignore dgBangerData", 
+             "Don't attempt to find dgBangerData origin for positioning elements"),
+            
+            ('SKIP_UNRELATED', 
+             "Skip vp_ + mtx", 
+             "Skips applying pre-calculated origin to objects which probably shouldn't use it (vp_vehicles, files with mtx pair)."),
+            
+            ('APPLY', 
+             "Apply to all", 
+             "Applies dgBangerData origin calculation to all objects which have dgBangerData filename pair."),
+        ],
+        default=user_settings.get("import_pkg_origin_placement", 'SKIP_UNRELATED'),
     )
 
     import_variants: BoolProperty(
         name="Import MM Variants",
         description="Variants are only applicable to Midtown Madness materials (multi-color options). Import?",
-        default=user_settings.get("import_variants", True),
+        default=user_settings.get("import_pkg_variants", True),
         )
+
+    def invoke(self, context, event): #memorization call
+        settings = load_settings()
+        pkg_path = settings.get("path_i_pkg", "")
+
+        if pkg_path and os.path.exists(pkg_path):
+            # Blender requires directories to end with a slash. WHY
+            if not pkg_path.endswith(os.sep) and not pkg_path.endswith(("/", "\\")):
+                pkg_path += os.sep
+            
+            self.filepath = pkg_path
+
+        return super().invoke(context, event)
 
     def execute(self, context):
         save_settings({
-            "import_lods": self.import_lods,
-            "import_bbnd": self.import_bbnd,
-            "use_roughness_instead_of_specular_two": self.use_roughness_instead_of_specular_two,
-            "import_headlights": self.import_headlights,
-            "import_coordinate_offset": self.import_coordinate_offset,
-            "batch_import_filter": self.batch_import_filter,
-            "xref_handling_mode": self.xref_handling_mode,
-            "import_variants": self.import_variants,
+            "import_pkg_lods": self.import_lods,
+            "import_pkg_bbnd": self.import_bbnd,
+            "import_pkg_use_roughness_instead": self.use_roughness_instead_of_specular_two,
+            "import_pkg_headlights": self.import_headlights,
+            "import_pkg_coordinate_offset": self.import_coordinate_offset,
+            "import_pkg_batch_filter": self.batch_import_filter,
+            "import_pkg_xref_handling": self.xref_handling,
+            "import_pkg_origin_placement": self.origin_placement,
+            "import_pkg_variants": self.import_variants,
+            "path_i_pkg": self.directory, #path import
         })
 
         from . import import_pkg
@@ -193,7 +302,7 @@ class ImportPKG(bpy.types.Operator, ImportHelper):
         return {'FINISHED'}
 
 class ImportBBND(bpy.types.Operator, ImportHelper):
-    """Import the bbnd file format (.bbnd)"""
+    """ Import AngelStudios BoxBoundary (Hitbox) """
     bl_idname = "import_scene.bbnd"
     bl_label = 'Import BBND'
     bl_options = {'UNDO'} 
@@ -208,7 +317,24 @@ class ImportBBND(bpy.types.Operator, ImportHelper):
         subtype='DIR_PATH',
     )
 
+    def invoke(self, context, event): #memorization call
+        settings = load_settings()
+        bbnd_path = settings.get("path_i_bbnd", "")
+
+        if bbnd_path and os.path.exists(bbnd_path):
+            if not bbnd_path.endswith(os.sep) and not bbnd_path.endswith(("/", "\\")):
+                bbnd_path += os.sep
+            
+            self.filepath = bbnd_path
+
+        return super().invoke(context, event)
+
+
     def execute(self, context):
+
+        save_settings({
+            "path_i_bbnd": self.directory,
+        })
         from . import import_bbnd
 
         keywords = self.as_keywords(ignore=("axis_forward",
@@ -223,32 +349,219 @@ class ImportBBND(bpy.types.Operator, ImportHelper):
             for file_elem in self.files:
                 full_filepath = os.path.join(self.directory, file_elem.name)
             
-                import_bbnd.runs(self, context, filepath=full_filepath, **keywords)
+                import_bbnd.runs(self, context, **keywords) #filepath=full_filepath,
 
         return {'FINISHED'}
 
-class ImportINST(bpy.types.Operator, ImportHelper):
-    """Import the inst file format (.inst) [BUGGY]"""
-    bl_idname = "import_scene.inst"
-    bl_label = 'Import .Inst'
-    bl_options = {'UNDO'}
+class ImportMODSKEL(bpy.types.Operator, ImportHelper):
+    """ Import AngelStudios Model/Skeleton files """
+    bl_idname = "import_scene.modskel"
+    bl_label = 'Import mod/skel files'
+    bl_options = {'UNDO'} 
+    filename_ext = ".mod"
+    filter_glob: StringProperty(default="*.mod;*.skel", options={'HIDDEN'})
 
-    filename_ext = ".inst"
-    filter_glob: StringProperty(default="*.inst", options={'HIDDEN'},)
+    files: CollectionProperty(name="File Path", type=bpy.types.OperatorFileListElement)
+    directory: StringProperty(subtype='DIR_PATH')
+
+    force_shader_override: BoolProperty(
+        name="Force .shaders Override",
+        description="Attempt to read external binary .shaders file for materials",
+        default=user_settings.get("import_modskel_force_shader", False),
+    )
+    import_hitboxes: BoolProperty(
+        name="Import Hitboxes",
+        description="Generate collision capsules from .rays file if found",
+        default=user_settings.get("import_modskel_hitboxes", True),
+    )
+    default_hitboxes: BoolProperty(
+        name="Fallback Default Hitboxes",
+        description="Generate basic hitboxes even if .rays is missing",
+        default=user_settings.get("import_modskel_default_hitboxes", False),
+    )
+    import_rotate_filter: EnumProperty(
+        name="Axis of Animation",
+        description="Default rotation into Blender",
+        items=[
+            ('NONE', 
+             "Don't Rotate Z", 
+             "Default Blender Importing"),
+            
+            ('PLUS_NINTY', 
+             "+90 Degrees Z", 
+             "Imports animation so character is facing a different way."),
+            
+            ('PLUS_ONE_EIGHTY', 
+             "+180 Degrees Z", 
+             "Imports animation so character is facing a different way."),
+
+            ('MINUS_NINTY', 
+             "+270 Degrees Z", 
+             "Imports animation so character is facing a different way."),
+        ],
+        default=user_settings.get("import_modskel_rotate_filter", "PLUS_ONE_EIGHTY"),
+    )
+    def invoke(self, context, event):
+        settings = load_settings()
         
+        modskel_path = settings.get("path_i_modskel", "")
+        if modskel_path and os.path.exists(modskel_path):
+            if not modskel_path.endswith(os.sep) and not modskel_path.endswith(("/", "\\")):
+                modskel_path += os.sep
+            self.filepath = modskel_path
+
+        self.force_shader_override = settings.get("import_modskel_force_shader", False)
+        self.import_hitboxes = settings.get("import_modskel_hitboxes", True)
+        self.default_hitboxes = settings.get("import_modskel_default_hitboxes", False)
+        self.import_rotate_filter = settings.get("import_modskel_rotate_filter", "PLUS_ONE_EIGHTY")
+
+        return super().invoke(context, event)
+
     def execute(self, context):
-        from . import import_inst
-
-        return import_inst.runs(self.filepath, context)
-
-class ImportPSDL(bpy.types.Operator, ImportHelper):
-    """Import the psd1 file format (.psdl) [BUGGY]"""
-    bl_idname = "import_scene.psdl"
-    bl_label = 'Import .psdl'
-    bl_options = {'UNDO'}
-    filename_ext = ".inst"
-    filter_glob: StringProperty(default="*.psdl", options={'HIDDEN'},)
+        from . import import_skel_mod_shader_rays
+        save_settings({
+            "import_modskel_force_shader": self.force_shader_override,
+            "import_modskel_hitboxes": self.import_hitboxes,
+            "import_modskel_default_hitboxes": self.default_hitboxes,
+            "import_modskel_rotate_filter": self.import_rotate_filter,
+            "path_i_modskel": self.directory,
+        })
         
+        selected_files = [os.path.join(self.directory, f.name) for f in self.files]
+        
+        # Scenario 1: Exact 2 files chosen (Manual Override)
+        if len(selected_files) == 2:
+            mod_path = next((f for f in selected_files if f.lower().endswith('.mod')), None)
+            skel_path = next((f for f in selected_files if f.lower().endswith('.skel')), None)
+            if mod_path and skel_path:
+                import_skel_mod_shader_rays.runs(context, mod_path=mod_path, skel_path=skel_path, operator=self)
+                return {'FINISHED'}
+
+        processed_bases = set()
+        for filepath in selected_files:
+            base_name, ext = os.path.splitext(filepath)
+            if base_name in processed_bases: continue
+            processed_bases.add(base_name)
+            
+            mod_path = base_name + ".mod"
+            skel_path = base_name + ".skel"
+            
+            has_mod = os.path.exists(mod_path)
+            has_skel = os.path.exists(skel_path)
+            
+            # Scenario 2: Both files exist automatically with the same name
+            if has_mod and has_skel:
+                print(f"[Import] Auto-paired {base_name}.mod and .skel!")
+                import_skel_mod_shader_rays.runs(context, mod_path=mod_path, skel_path=skel_path, operator=self)
+                
+            # Scenario 3: Only 1 file picked, and no auto-pair was found!
+            elif len(selected_files) == 1:
+                print(f"[Import] Missing pair for {base_name}. Launching search dialog...")
+                bpy.ops.import_scene.angel_find_pair('INVOKE_DEFAULT', 
+                                                     original_filepath=filepath,
+                                                     force_shader_override=self.force_shader_override,
+                                                     import_hitboxes=self.import_hitboxes,
+                                                     default_hitboxes=self.default_hitboxes,
+                                                     import_rotate_filter=self.import_rotate_filter,
+                                                     )
+                return {'FINISHED'}
+                
+            # Scenario 4: Batch Import (Just grab whatever exists)
+            else:
+                import_skel_mod_shader_rays.runs(context, 
+                                                 mod_path=mod_path if has_mod else None, 
+                                                 skel_path=skel_path if has_skel else None, 
+                                                 operator=self)
+
+        return {'FINISHED'}
+
+class ImportAngelEnginePair(bpy.types.Operator, ImportHelper):
+    """Find the missing .mod or .skel pair"""
+    bl_idname = "import_scene.angel_find_pair"
+    bl_label = 'Select Missing Pair File'
+    bl_options = {'UNDO'} 
+    
+    filter_glob: StringProperty(default="*.mod;*.skel", options={'HIDDEN'})
+    
+    original_filepath: StringProperty(options={'HIDDEN'})
+    force_shader_override: BoolProperty(options={'HIDDEN'})
+    import_hitboxes: BoolProperty(options={'HIDDEN'})
+    default_hitboxes: BoolProperty(options={'HIDDEN'})
+    import_rotate_filter: StringProperty(options={'HIDDEN'})
+
+    def draw(self, context): 
+        layout = self.layout
+        box = layout.box()
+        box.label(text="Reminder:", icon='INFO')
+        
+        # Determine what we actually have and what is missing
+        is_mod = self.original_filepath.lower().endswith('.mod')
+        current_ext = ".mod" if is_mod else ".skel"
+        missing_ext = ".skel" if is_mod else ".mod"
+        if is_mod:
+            finalText = "otherwise your geometry will be bad."
+        else:
+            finalText = "otherwise your rig will be useless."
+        
+        box.label(text=f"You just imported a {current_ext} file, but")
+        box.label(text=f"it had no detectable pair.")
+        box.label(text=f"Please locate the matching {missing_ext} file,")
+        box.label(text=f"{finalText}")
+
+    def invoke(self, context, event):
+        # 1. Dynamically change the file filter BEFORE the window opens
+        is_mod = self.original_filepath.lower().endswith('.mod')
+        self.filter_glob = "*.skel" if is_mod else "*.mod"
+
+        # 2. Load settings for the starting directory
+        settings = load_settings()
+        modskel_path = settings.get("path_i_modskel", "") 
+        if modskel_path and os.path.exists(modskel_path):
+            if not modskel_path.endswith(os.sep) and not modskel_path.endswith(("/", "\\")):
+                modskel_path += os.sep
+            self.filepath = modskel_path
+
+        return super().invoke(context, event)
+
+    def execute(self, context):
+        from . import import_skel_mod_shader_rays
+        
+        file1 = self.original_filepath
+        file2 = self.filepath
+        
+        is_mod = file1.lower().endswith('.mod')
+        expected_ext = ".skel" if is_mod else ".mod"
+        
+        # Safety Check: If the user manually types an invalid extension and hits import anyway
+        if not file2.lower().endswith(expected_ext):
+            self.report({'WARNING'}, f"Invalid pair! Expected a {expected_ext} file. Importing single file instead.")
+            return self.cancel(context)
+        
+        mod_path = file1 if is_mod else file2
+        skel_path = file2 if is_mod else file1
+        
+        print(f"[Import] Found pair! Mod: {mod_path} | Skel: {skel_path}")
+        import_skel_mod_shader_rays.runs(context, mod_path=mod_path, skel_path=skel_path, operator=self)
+        return {'FINISHED'}
+        
+    def cancel(self, context):
+        from . import import_skel_mod_shader_rays
+        print("[Import] User cancelled pair search. Importing single file.")
+        
+        mod_path = self.original_filepath if self.original_filepath.lower().endswith('.mod') else None
+        skel_path = self.original_filepath if self.original_filepath.lower().endswith('.skel') else None
+        
+        import_skel_mod_shader_rays.runs(context, mod_path=mod_path, skel_path=skel_path, operator=self)
+        return {'CANCELLED'}
+
+class ImportANIM(bpy.types.Operator, ImportHelper):
+    """ Import MCSR Animation for .mod&.skel Files """
+    bl_idname = "import_scene.anim"
+    bl_label = 'Import ANIM'
+    bl_options = {'UNDO'} 
+    filename_ext = ".anim"
+    filter_glob: StringProperty(default="*.anim", options={'HIDDEN'},)
+
     files: CollectionProperty(
         name="File Path",
         type=bpy.types.OperatorFileListElement,
@@ -256,51 +569,48 @@ class ImportPSDL(bpy.types.Operator, ImportHelper):
     directory: StringProperty(
         subtype='DIR_PATH',
     )
+    
+    def draw(self, context):
+        layout = self.layout
+        box = layout.box()
+        box.label(text="Reminder:", icon='INFO')
+        box.label(text="Animations require a rig import.")
+        box.label(text="You must select the rig when Importing.")
+        box.label(text="(Import rig via mod/skel Importing!)")
 
-    setting_one: BoolProperty(
-        name="SETTINGS ONE",
-        description="",
-        default=user_settings.get("setting_one", True),
-        )    
+    def invoke(self, context, event):
+        settings = load_settings()
+        anim_path = settings.get("path_i_anim", "")
 
-    setting_two: EnumProperty(
-        name="SETTINGS TWO",
-        description="",
-        items=[
-            ('OPTIONONE', "Name", "Desc"),
-            ('OPTIONTWO', "Name", "Desc"),
-        ],
-        default='OPTIONONE' 
-    )
+        if anim_path and os.path.exists(anim_path):
+            if not anim_path.endswith(os.sep) and not anim_path.endswith(("/", "\\")):
+                anim_path += os.sep
+            self.filepath = anim_path
+
+        return super().invoke(context, event)
 
     def execute(self, context):
-        save_settings({
-            "setting_one": self.setting_one,
-            "setting_two": self.setting_two,
-        })
+        save_settings({"path_i_anim": self.directory})
+        from . import import_anim
 
-        from . import import_psdl
-        keywords = self.as_keywords(ignore=("axis_forward",
-                                            "axis_up",
-                                            "filter_glob",
-                                            "check_existing",
-                                            "filepath",
-                                            "files",
-                                            "directory"
-                                            ))
         if self.files:
-            for file_elem in self.files:
-                full_filepath = os.path.join(self.directory, file_elem.name)
-            
-                import_psdl.runs(self, context, filepath=full_filepath, **keywords)
+            # Batch all files together to send to the import module
+            filepaths = [os.path.join(self.directory, f.name) for f in self.files]
+            import_anim.runs(self, context, filepaths)
 
         return {'FINISHED'}
 
 
+#class ExportPSDL
 
+#class ExportBAI
+
+#class ExportCVPS
+
+#class ExportINST 
 
 class ExportPKG(bpy.types.Operator, ExportHelper):
-    """Export to PKG file format (.PKG)"""
+    """ Export AngelStudios PKG """
     bl_idname = "export_scene.pkg"
     bl_label = 'Export PKG'
 
@@ -313,56 +623,92 @@ class ExportPKG(bpy.types.Operator, ExportHelper):
     export_bbnd_file: BoolProperty(
         name="Export bbnd (BOUND) file too",
         description="If 'BOUND'-named object is selected, export it too (to ../bound folder)",
-        default=user_settings.get("export_bbnd_file", True),
+        default=user_settings.get("export_pkg_bbnd_file", True),
         )    
     
     export_headlights: BoolProperty(
         name="Export headlights",
         description="If geometry is named HLIGHT/HEADLIGHT, and geometry is apropriate (2 tris/headlight or 1 plane per headlight), export applicable MTX file",
-        default=user_settings.get("export_headlights", True),
+        default=user_settings.get("export_pkg_headlights", True),
         )    
     
     use_roughness_instead_of_specular_one: BoolProperty(
         name="Export Materials using roughness for shininess",
         description="Reccomended to select this; If unselected, 'Specular ⌄ IOR Level' (original, outdated functionality) will determine shininess.",
-        default=user_settings.get("use_roughness_instead_of_specular_one", True),
+        default=user_settings.get("export_pkg_use_roughness_instead", True),
         )
 
     e_vertexcolors: BoolProperty(
         name="Vertex Colors (Diffuse)",
         description="Export vertex colors that might affect diffuse",
-        default=user_settings.get("e_vertexcolors", False),
+        default=user_settings.get("export_pkg_e_vertexcolors", False),
         )
         
     e_vertexcolors_s: BoolProperty(
         name="Vertex Colors (Specular)",
         description="Export vertex colors that might affect specular",
-        default=user_settings.get("e_vertexcolors_s", False),
+        default=user_settings.get("export_pkg_e_vertexcolors_s", False),
         )
         
     apply_modifiers: BoolProperty(
         name="Apply Modifiers",
         description="(Temporarily) apply Blender modifiers to objects before exporting to the pkg?",
-        default=user_settings.get("apply_modifiers", True),
+        default=user_settings.get("export_pkg_apply_modifiers", True),
         )
-        
+
+    origin_placement: EnumProperty(
+        name="Origin Placement",
+        description="Apply dgBangerData Center of Gravity    ",
+        items=[
+            ('NONE', 
+             "Ignore dgBangerData", 
+             "Don't attempt to find dgBangerData origin for positioning elements. Select this if selected on import."),
+            
+            ('APPLY', 
+             "Apply to all", 
+             "Undo-s dgBangerData origin calculation to all objects which have dgBangerData custom property. Choose this if selected on import."),
+        ],
+        default=user_settings.get("export_origin_placement", 'APPLY'),
+    )
+
     #selection_only: BoolProperty(
     #    name="Selection Only",
     #    description="This is enabled whether you select it or not",
     #    default=True,
     #    )
         
+    def invoke(self, context, event): #memorization call
+        settings = load_settings()
+        pkg_path = settings.get("path_e_pkg", "")
+
+        if pkg_path and os.path.exists(pkg_path):
+            # We want to provide a default name so the export window doesn't have a blank textbox
+            if context.active_object:
+                default_name = context.active_object.name + self.filename_ext
+            elif bpy.data.filepath:
+                default_name = bpy.path.display_name_from_filepath(bpy.data.filepath) + self.filename_ext
+            else:
+                default_name = "untitled" + self.filename_ext
+            
+            # Combine the saved folder path with the default file name
+            self.filepath = os.path.join(pkg_path, default_name)
+
+        return super().invoke(context, event)
+
+
     def execute(self, context):
+        export_directory = os.path.dirname(self.filepath)
 
         save_settings({
-            "export_bbnd_file": self.export_bbnd_file,
-            "use_roughness_instead_of_specular_one": self.use_roughness_instead_of_specular_one,
-            "e_vertexcolors": self.e_vertexcolors,
-            "e_vertexcolors_s": self.e_vertexcolors_s,
-            "apply_modifiers": self.apply_modifiers,
-            "export_headlights": self.export_headlights,
+            "export_pkg_bbnd_file": self.export_bbnd_file,
+            "export_pkg_headlights": self.export_headlights,
+            "export_pkg_use_roughness_instead": self.use_roughness_instead_of_specular_one,
+            "export_pkg_e_vertexcolors": self.e_vertexcolors,
+            "export_pkg_e_vertexcolors_s": self.e_vertexcolors_s,
+            "export_pkg_apply_modifiers": self.apply_modifiers,
+            "export_origin_placement": self.origin_placement,
+            "path_e_pkg": export_directory,
         })
-
 
         from . import export_pkg
         
@@ -375,20 +721,90 @@ class ExportPKG(bpy.types.Operator, ExportHelper):
         return export_pkg.save(self, context, **keywords)
 
 class ExportBBND(bpy.types.Operator, ExportHelper):
-    """Export to bbnd file format (.bbnd)"""
+    """ Export AngelStudios BoxBoundary (Hitbox) """
     bl_idname = "export_scene.bbnd"
     bl_label = 'Export BBND'
 
     filename_ext = ".bbnd"
     filter_glob: StringProperty(default="*.bbnd;*.bnd", options={'HIDDEN'},)
-        
+
+    def invoke(self, context, event): #memorization call
+        settings = load_settings()
+        bbnd_path = settings.get("path_e_bbnd", "")
+
+        if bbnd_path and os.path.exists(bbnd_path):
+            if context.active_object:
+                default_name = context.active_object.name + self.filename_ext
+            elif bpy.data.filepath:
+                default_name = bpy.path.display_name_from_filepath(bpy.data.filepath) + self.filename_ext
+            else:
+                default_name = "untitled" + self.filename_ext
+            
+            self.filepath = os.path.join(bbnd_path, default_name)
+
+        return super().invoke(context, event)
+
     def execute(self, context):
+        export_directory = os.path.dirname(self.filepath)
+
+        save_settings({
+            "path_e_bbnd": export_directory,
+        })
         from . import export_bbnd
                                     
         return export_bbnd.save(self, context)
 
+#class ExportMODSKEL #exports based on selection, and ignores "ROOT" or "IGNORE" bonennames in hierarchy
+
+class ExportANIM(bpy.types.Operator, ExportHelper):
+    """ Export AngelStudios .mod&.skel Animation """
+    bl_idname = "export_scene.anim"
+    bl_label = 'Export ANIM'
+    bl_options = {'UNDO'}
+    filename_ext = ".anim"
+    filter_glob: StringProperty(default="*.anim", options={'HIDDEN'})
+    
+    def draw(self, context):
+        layout = self.layout
+        box = layout.box()
+        box.label(text="Export Rules:", icon='INFO')
+        box.label(text="Only Pedestrian formatting exported.")
+        box.label(text="Ensures ROOT bone is ignored.")
+
+    def invoke(self, context, event):
+        settings = load_settings()
+        anim_path = settings.get("path_e_anim", "")
+
+        if anim_path and os.path.exists(anim_path):
+            if not anim_path.endswith(os.sep) and not anim_path.endswith(("/", "\\")):
+                anim_path += os.sep
+            self.filepath = anim_path
+
+        return super().invoke(context, event)
+
+    def execute(self, context):
+        save_settings({"path_e_anim": os.path.dirname(self.filepath)})
+        from . import export_anim
+
+        export_anim.runs(self, context, self.filepath)
+        return {'FINISHED'}
+
+
+#Not implemented, may not have read-data
+class ImportINST(bpy.types.Operator, ImportHelper):
+    bl_idname = "import_scene.inst"
+    bl_label = 'Import .Inst'
+    bl_options = {'UNDO'}
+
+    filename_ext = ".inst"
+    filter_glob: StringProperty(default="*.inst", options={'HIDDEN'},)
+        
+    def execute(self, context):
+        from . import import_inst
+
+        return import_inst.runs(self.filepath, context)
+
 class ExportINST(bpy.types.Operator, ImportHelper):
-    """Export selected objects into .inst"""
     bl_idname = "export_scene.inst"
     bl_label = 'Export .inst'
     bl_options = {'UNDO'}
@@ -401,28 +817,57 @@ class ExportINST(bpy.types.Operator, ImportHelper):
 
         return export_inst.runs(self.filepath, context)
 
+
+
 # Adds to menu
 def menu_func_import(self, context):
-    self.layout.operator(ImportPKG.bl_idname,  text="Angel Studios ModPackage  (.pkg)")
-    self.layout.operator(ImportBBND.bl_idname, text="Angel Studios BoxBoundary (.bbnd)")
-    self.layout.operator(ImportPSDL.bl_idname, text="Angel Studios psdl        (.psdl)")
+    self.layout.operator(ImportPSDL.bl_idname,    text="Angel Studios psdl                (.psdl)")
+    #self.layout.operator(ImportPSDL.bl_idname,    text="Angel Studios BoundaryAI  (.bai)")
+    #self.layout.operator(ImportPSDL.bl_idname,    text="Angel Studios cvps          (.cvps)")
+    #self.layout.operator(ImportINSTANCES.bl_idname,    text="Angel Studios Instances (.inst)")
+    self.layout.operator(ImportPKG.bl_idname,     text="Angel Studios ModPackage  (.pkg)")
+    self.layout.operator(ImportBBND.bl_idname,    text="Angel Studios BoxBoundary (.bbnd)")
+    self.layout.operator(ImportMODSKEL.bl_idname, text="Angel Studios Model             (.mod, .skel)")
+    self.layout.operator(ImportANIM.bl_idname,    text="Angel Studios Animation       (.anim)")
     #self.layout.operator(ImportINST.bl_idname, text="Angel Studios sp_stop_f   (.inst)")
 
 def menu_func_export(self, context):
+    #self.layout.operator(ExportPSDL.bl_idname,    text="Angel Studios psdl                (.psdl)")
+    #self.layout.operator(ExportPSDL.bl_idname,    text="Angel Studios BoundaryAI  (.bai)")
+    #self.layout.operator(ExportPSDL.bl_idname,    text="Angel Studios cvps          (.cvps)")
+    #self.layout.operator(ExportINSTANCES.bl_idname,    text="Angel Studios Instances (.inst)")
     self.layout.operator(ExportPKG.bl_idname,  text="Angel Studios ModPackage  (.pkg)")
     self.layout.operator(ExportBBND.bl_idname, text="Angel Studios BoxBoundary (.bbnd)")
+    #self.layout.operator(ExportMODSKEL.bl_idname, text="Angel Studios Model             (.mod, .skel)")
+    self.layout.operator(ExportANIM.bl_idname, text="Angel Studios Animation       (.anim)")
     #self.layout.operator(ExportINST.bl_idname, text="Angel Studios sp_stop_f   (.inst)")
 
 
 # Register factories
-classes = (
+classes = ( #this is the best hierarchy: PSDL, PKG, BBND, ModSkel, Anim, ... 
+            #Should look into exporting the selected material as a .Tex or .TGA file
+            #.Tex has best functionality (ability for emission masks, alpha masks, + color masks)
+    ImportPSDL,
+    #ImportBAI,
+    #ImportCVPS,
+    #ImportINST, <-- big inst file, not small one. Looks super easy to reverse-engineer
     ImportPKG,
     ImportBBND,
-    ImportPSDL,
-    #ImportINST,
+    ImportMODSKEL,
+    ImportAngelEnginePair, #not visible in File -> Import, but required in order to be called by other function!
+    ImportANIM,
+    
+    #ExportPSDL,
+    #ExportBAI,
+    #ExportCVPS,
+    #ExportINST, 
     ExportPKG,
     ExportBBND,
-    #ExportINST,
+    #ExportMODSKEL, #exports 2 files with same name as each other (.skel + .mod)
+    ExportANIM,
+
+    #ImportINST, <-- small inst file (useless?)
+    #ExportINST, <-- small inst file (useless?)
 )
 
 def register():
@@ -441,7 +886,6 @@ def register():
     bpy.types.Material.cloned_from = bpy.props.PointerProperty(name="Cloned From", type=bpy.types.Material)
     
     bpy.types.Scene.angel = PointerProperty(type=angel_scenedata.AngelSceneData)
-
 
 def unregister():
     del bpy.types.Scene.angel
@@ -471,16 +915,18 @@ if __name__ == "__main__":
 #          PLAINTEXT
 #          PLAINTEXT
 #/anim
+#    .anim (animation file, requires .mod and .skel to work)
 #    .mod  (model data for pedestrians)
-#    .rays (likely look-at info)
+#    .rays (collision geometry / possibly raycaster info for peds)
 #    .skel (rig)
 #/city
 #    .aimap   (related to vehicle/ped spawning for specific map config)
-#    .reset   (player respawn point)
+#    .reset   (player respawn point - pos then z rotation)
 #    .sky     (global lighting rule)
 #    .water   (global water height?)
+#    .mtl     (Describes friction/collision values for all bbnd collision materials)
 #    _lighting.csv
-#/city/m01 /city/l01
+#/city/m01 /city/l01 #PROBABLY ALL LEFTOVER DEV FILES, seemingly not used
 #    facades.csv
 #    lighting.csv
 #    propdefs.csv
@@ -488,7 +934,7 @@ if __name__ == "__main__":
 #/citylights
 #    .lmp      (lamp)
 #/frontend
-#    .htm      (a version of old html)
+#    .htm      (a version of very old html with extremely basic functionality)
 #    .txt      (vehicles, waypoint races)
 #/frontend
 #    all       (no extension, just all - a list of all items, not called)
@@ -523,8 +969,13 @@ if __name__ == "__main__":
 
 #          CAN READ (JAILBROKEN)
 #          CAN READ (JAILBROKEN)
+#/anim
+#    .mod      (ped model file, complete with materials)
+#    .skel     (describes character rig)
+#    .shaders  (Leftover dev data, unnecessary)
+#    .anim     (animation file, requires .mod/.skel to work)
 #/city
-#    .inst (low-end)
+#    .inst (low-end) [might be rules for braking in corners for AI]
 #    .
 #/audvag
 #    .VAG (audio, looped)
@@ -540,19 +991,20 @@ if __name__ == "__main__":
 
 #          NEEDS JAILBREAK
 #          NEEDS JAILBREAK
-#/anim
-#    .anim
-#    .shaders
 #/bound
-#    .ter     (related to .bbnd)
+#    .ter     (originally used to build bbnd files - but it's leftover dev data that is worthless!)
 #/city   
-#    .bai     (boundary AI)
-#    .inst    (sp references)
-#    .cpvs    (?)
-#    .psdl    (map file - semi-solved, but not really)
+#    .bai     (boundary AI - Tells AI where it can drive. Required for CTF to load, tells AI where to drive in races too)
+#              This file also describes all 'street furniture' + traffic/pedestrian paths.
+#              It probably draws splines related to where stuff needs to spawn.
+#    .inst    (Loads references to pkg files in the city, populates the city buildings + boundaries. Not required to load city)
+#    .cpvs    (When removed, lost functionality was not clear. Unsure what this file does)
+#    .psdl    (map file - Required to load city. Contains all roads + road decals, some land pieces,
+#              and describes textures, sidewalks, tunnels, various boundaries.
 #/city/m01 /city/l01
-#    .pathset (props, decals)
+#    .pathset (props, decals) [are likely leftover dev data blocks]
 #/fonts
 #    .strtbl  (in-sim textual content [AKA 'non-htm' text: Cutscenes, "next race", etc])
+#    .fonttex (probably describes how the image file = characters, grid-based)
 #/race/l01 /race/m01
-#    .short   (shortcut routes? Unsure)
+#    .short   (Leftover dev data, unnecessary)

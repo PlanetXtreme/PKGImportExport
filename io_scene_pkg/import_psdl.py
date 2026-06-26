@@ -1,3 +1,12 @@
+# ##### BEGIN LICENSE BLOCK #####
+#
+# This program is licensed under Creative Commons BY-NC-SA:
+# https://creativecommons.org/licenses/by-nc-sa/3.0/
+#
+# Created by PlanetXtreme, 2026
+#
+# ##### END LICENSE BLOCK #####
+
 import bpy
 import bmesh
 import struct
@@ -262,3 +271,4 @@ def build_blender_geometry(psdl):
                 mesh.update()
                 if temp_material:
                     obj.data.materials.append(temp_material)
+    

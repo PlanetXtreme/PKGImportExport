@@ -35,8 +35,8 @@ def make_placeholder_texture(name):
     im.update()
     return im
     
-def find_file_with_game_fallback(file, search_path, subfolder = None, ignore_subdir_on_search_path = False):
-    # first search the search_path
+def find_file_with_game_fallback(file, search_path, subfolder=None, ignore_subdir_on_search_path=False, modSkel=False):
+    # 1. First search the direct search_path
     find_path = (path.abspath(path.join(search_path, file))
                  if (subfolder is None or ignore_subdir_on_search_path)
                  else path.abspath(path.join(search_path, subfolder, file)))
@@ -44,8 +44,29 @@ def find_file_with_game_fallback(file, search_path, subfolder = None, ignore_sub
     #print("find_path initial:" + find_path)
     if path.isfile(find_path):
         return find_path
-    
-    # then search game dir
+
+    if modSkel:
+        # If search_path is ROOT\COMMON\anim, parent is ROOT\COMMON, grandparent is ROOT.
+        # If search_path is ROOT\anim, parent is ROOT.
+        parent_dir = path.dirname(search_path)
+        grandparent_dir = path.dirname(parent_dir)
+        
+        potential_roots = [parent_dir, grandparent_dir]
+        
+        # The specific texture folders to check within the found root
+        texture_subdirs = [
+            "texture", 
+            path.join("M01", "texture"), 
+            path.join("L01", "texture")
+        ]
+        
+        for root in potential_roots:
+            for tex_subdir in texture_subdirs:
+                check_path = path.abspath(path.join(root, tex_subdir, file))
+                if path.isfile(check_path):
+                    print("Found texture via modSkel: " + check_path)
+                    return check_path
+    # 3. Then search global game dir (from addon preferences)
     preferences = bpy.context.preferences
     addon_prefs = preferences.addons[__package__].preferences
     if addon_prefs.use_gamepath:
@@ -56,14 +77,12 @@ def find_file_with_game_fallback(file, search_path, subfolder = None, ignore_sub
         if path.isfile(find_path):
             return find_path
 
-    # wasn't found in game dir or search_path
     return None
-
 
 def load_texture_from_path(file_path, use_placeholder_if_missing=True):
     # extract the filename for manual image format names
-    imgname=path.basename(file_path)
-    imgname=os.path.splitext(imgname)[0]
+    imgname = path.basename(file_path)
+    imgname = os.path.splitext(imgname)[0]
     
     if not path.isfile(file_path):
         return make_placeholder_texture(imgname)
@@ -73,8 +92,7 @@ def load_texture_from_path(file_path, use_placeholder_if_missing=True):
         if tf.is_valid():
             tf_img = tf.to_blender_image(imgname)
             tf_img.filepath_raw = file_path # set filepath manually for TEX stuff, since we make it ourself
-
-
+            #print(f"Our new filepath: {tf_img.filepathj_raw}, {imgname}")
             return tf_img
         else:
             print("Invalid TEX file: " + file_path)
@@ -83,33 +101,33 @@ def load_texture_from_path(file_path, use_placeholder_if_missing=True):
         return img
         
     return None    
-
-    
-def try_load_texture(tex_name, search_path):
+   
+def try_load_texture(tex_name, search_path, modSkel=False):
     existing_image = bpy.data.images.get(tex_name)
     if existing_image is not None:
         return existing_image
     
+    # Check for .tex
     find_file = tex_name + ".tex"
-    found_file = find_file_with_game_fallback(find_file, search_path, "texture")
+    found_file = find_file_with_game_fallback(find_file, search_path, "texture", modSkel=modSkel)
     if found_file is not None:
         tf_img = load_texture_from_path(found_file)
         if tf_img is not None:
+            #print(f" found image: {tf_img} is {found_file}")
             return tf_img
     
-    standard_extensions = (".tga", ".bmp", ".png", ".jpg") #jpg can be supported with cheats, but still isn't fully supported as of 06/2026
+    # Check for standard extensions
+    standard_extensions = (".tga", ".bmp", ".png", ".jpg") # jpg can be supported with cheats, but still isn't fully supported as of 06/2026
     for ext in standard_extensions:
         find_file = tex_name + ext
-        found_file = find_file_with_game_fallback(find_file, search_path, "texture")
+        found_file = find_file_with_game_fallback(find_file, search_path, "texture", modSkel=modSkel)
         if found_file is not None:
             return load_texture_from_path(found_file)
         
     return None
- 
- 
+  
 def get_raw_object_name(meshname):
     return meshname.upper().replace("_VL", "").replace("_L", "").replace("_M", "").replace("_H", "")
-
 
 def get_object_lod_name(item):
     item_upper = item.upper()
@@ -142,11 +160,9 @@ def get_alphabetical_lod_id(item):
         return "D"
     return "E"
 
-
 def get_undupe_name(name):
     nidx = name.find('.')
     return name[:nidx] if nidx != -1 else name
-
 
 def is_matrix_object(obj):
     obj_name = get_raw_object_name(obj.name)

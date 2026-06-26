@@ -12,6 +12,7 @@ import os, time, struct, math
 
 import os.path as path
 from mathutils import*
+from mathutils import Vector, Matrix #redundant dummy
 
 from pkgimporter.fvf import FVF
 from pkgimporter.shader_set import (ShaderSet, Shader)
@@ -23,12 +24,7 @@ import pkgimporter.import_bbnd as extract_bbnd_file
 
 pkg_path = None
 
-######################################################
-# GLOBAL LISTS
-######################################################
-
-# Misc MTX objects are objects that aren't part of PKG, but 
-# related/essential enough that we load them in for user editing.
+#misc objects that are legacy MidtownMadness implementation
 misc_mtx_objects = ["EXHAUST0", "EXHAUST1"]
 
 XREF_CACHE = {} 
@@ -95,9 +91,6 @@ def fast_scan_for_skip(filepath, filter_mode):
             
     return False
 
-######################################################
-# IMPORT MAIN FILES
-######################################################
 def read_shaders_file(file, length, offset, import_variants, use_roughness_instead_of_specular_two):
     # get custom stuff
 
@@ -175,8 +168,8 @@ def read_shaders_file(file, length, offset, import_variants, use_roughness_inste
     file.seek(length - (file.tell() - offset), 1)
     return
 
-def read_xrefs(file, root_parent_obj, collection, xref_handling_mode, parent_filepath, context):
-    if xref_handling_mode == 'SKIP':
+def read_xrefs(file, root_parent_obj, collection, xref_handling, parent_filepath, context):
+    if xref_handling == 'SKIP':
         num_xrefs = struct.unpack('L', file.read(4))[0]
         # Skip logic here (approximate byte skipping if you have it)
         return
@@ -203,7 +196,7 @@ def read_xrefs(file, root_parent_obj, collection, xref_handling_mode, parent_fil
         ob.parent = root_parent_obj 
         collection.objects.link(ob) 
         
-        if xref_handling_mode in {'INSTANCED', 'GEOMETRY'}:
+        if xref_handling in {'INSTANCED', 'GEOMETRY'}:
                     
             # SAFE CACHE CHECK: Ensure the cache exists AND the Blender data hasn't been deleted
             is_cached_and_alive = False
@@ -239,7 +232,8 @@ def read_xrefs(file, root_parent_obj, collection, xref_handling_mode, parent_fil
                         import_headlights=False, 
                         import_coordinate_offset=True,
                         batch_import_filter='NONE', 
-                        xref_handling_mode='EMPTYS',  
+                        xref_handling='EMPTYS',  
+                        origin_placement='SKIP_UNRELATED',  
                         import_variants=False,
                         is_batch_mode=False,
                         is_xref_import=True 
@@ -254,26 +248,24 @@ def read_xrefs(file, root_parent_obj, collection, xref_handling_mode, parent_fil
             # 4. Apply to Empty
             cached_col = XREF_CACHE.get(xref_name)
             if cached_col is not None:
-                if xref_handling_mode == 'INSTANCED':
+                if xref_handling == 'INSTANCED':
                     # Create a Collection Instance
                     ob.instance_type = 'COLLECTION'
                     ob.instance_collection = cached_col
                     
-                elif xref_handling_mode == 'GEOMETRY':
-                    # Create actual editable geometry in the scene
+                elif xref_handling == 'GEOMETRY':
                     old_to_new = {}
                     
                     for src_obj in cached_col.objects:
                         new_obj = src_obj.copy()
                         
-                        # NOTE: By default, .copy() shares Mesh Data (like pressing Alt+D) to save memory.
-                        # If you want 100% unique, unlinked mesh data (like pressing Shift+D), uncomment the next 2 lines:
+                        # By default, .copy() shares Mesh Data (like pressing Alt+D) to save memory.
+                        # If you want 100% unique, unlinked mesh data: Uncomment the next 2 lines
                         # if new_obj.data is not None:
                         #     new_obj.data = new_obj.data.copy()
                         
                         old_to_new[src_obj] = new_obj
                         
-                        # Link the new object to the exact same collection(s) as the Empty 'ob'
                         if ob.users_collection:
                             for col in ob.users_collection:
                                 col.objects.link(new_obj)
@@ -289,7 +281,6 @@ def read_xrefs(file, root_parent_obj, collection, xref_handling_mode, parent_fil
                         else:
                             # Root objects of the XREF: Parent them to the main Empty locator
                             new_obj.parent = ob
-                            # The objects will inherit 'ob's world location/rotation automatically
 
 def read_geometry_file(file, meshname, root_parent_obj, collection):
     scn = bpy.context.scene
@@ -305,9 +296,7 @@ def read_geometry_file(file, meshname, root_parent_obj, collection):
     uv_layer = bm.loops.layers.uv.new()
     vc_layer = bm.loops.layers.color.new()
     
-    scn.collection.objects.link(ob)
-    bpy.context.view_layer.objects.active = ob
-    bpy.ops.object.mode_set(mode='EDIT', toggle=False)
+    collection.objects.link(ob)
     
     # read geometry FILE data
     num_sections, num_vertices_tot, num_indices_tot, num_sections_dupe, fvf = struct.unpack('5L', file.read(20))
@@ -321,7 +310,6 @@ def read_geometry_file(file, meshname, root_parent_obj, collection):
     mesh_colors = []
     index_offset = 0
 
-    collection.objects.link(ob)
     ob.parent = root_parent_obj
     
     for num in range(num_sections):
@@ -421,7 +409,6 @@ def read_geometry_file(file, meshname, root_parent_obj, collection):
             index_offset += num_vertices
 
     # apply bmesh data to object
-    bpy.ops.object.mode_set(mode='OBJECT', toggle=False)
     bm.to_mesh(me)
     bm.free()
     
@@ -432,16 +419,18 @@ def read_geometry_file(file, meshname, root_parent_obj, collection):
     # lastly, look for a MTX file. Don't grab an MTX for FNDR_M/L/VL though
     # as the FNDR lods are static and don't use the mtx
     if not ("fndr" in meshname.lower() and not "_h" in meshname.lower()):
-      if helper.is_matrix_object(ob):
-        # some objects actually use MTX as a matrix.
-        mtx = import_helper.find_matrix3x4(meshname, pkg_path)
-        if mtx is not None:
-            ob.matrix_world = mtx
-      else:
-        # others use it as min,max,pivot,origin
-        found, min, max, pivot, origin = import_helper.find_matrix(meshname, pkg_path)
-        if found:
-            ob.location = origin
+        if helper.is_matrix_object(ob):
+            # some objects actually use MTX as a matrix.
+            mtx = import_helper.find_matrix3x4(meshname, pkg_path)
+            if mtx is not None:
+                ob.matrix_world = mtx
+        else:
+            # others use it as min,max,pivot,origin
+            found, min, max, pivot, origin = import_helper.find_matrix(meshname, pkg_path)
+            if found:
+                ob.location = origin
+    else:
+        print(f"no location data found")
           
     # Return the object so load_pkg can apply the offset to it later
     return ob
@@ -456,10 +445,69 @@ def import_misc_mtx(root_parent_obj, collection):
             ob.show_name = True
             ob.parent = root_parent_obj
             collection.objects.link(ob)
-        
-######################################################
-# IMPORT
-######################################################
+
+def apply_dgbanger_data(obj_name, obj, pkg_path, origin_placement):
+    """
+    Finds the associated dgBangerData file relative to the PKG path and applies
+    its calculated Center of Gravity offset to positioning the object.
+    """
+    #print(f"trying to apply dgbangerdata. {obj_name}, {obj}, {pkg_path}, {origin_placement}")
+    if origin_placement == 'NONE':
+        return
+
+    pkg_basename = os.path.splitext(os.path.basename(pkg_path))[0]
+    # Process skipping logic
+    if origin_placement == 'SKIP_UNRELATED':
+        if pkg_basename.lower().startswith('vp_'):
+            return
+            
+        # Ignore if it has an existing MTX pair offset already applied in `read_geometry_file`
+        if not ("fndr" in obj_name.lower() and not "_h" in obj_name.lower()):
+            if helper.is_matrix_object(obj):
+                if import_helper.find_matrix3x4(obj_name, pkg_path) is not None:
+                    return
+            #else:
+            #    found, _, _, _, _ = import_helper.find_matrix(obj_name, pkg_path)
+            #    if found:
+            #        return
+
+    pkg_dir = os.path.dirname(pkg_path)
+    
+    # Paths to search based on given criteria
+    paths_to_check = [
+        os.path.join(pkg_dir, "..", "..", "M01", "tune", "banger", f"{pkg_basename}.dgBangerData"),
+        os.path.join(pkg_dir, "..", "..", "L01", "tune", "banger", f"{pkg_basename}.dgBangerData"),
+        os.path.join(pkg_dir, "..", "tune", "banger", f"{pkg_basename}.dgBangerData"),
+    ]
+    
+    found_path = None
+    for p in paths_to_check:
+        p_norm = os.path.normpath(p)
+        if os.path.exists(p_norm):
+            found_path = p_norm
+            break
+            
+    if found_path is not None:
+        try:
+            with open(found_path, 'r', encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    line_stripped = line.strip()
+                    if line_stripped.startswith("CG "):
+                        parts = line_stripped.split()
+                        if len(parts) >= 4:
+                            x = float(parts[1])
+                            y = float(parts[2])
+                            z = float(parts[3])
+                            
+                            #obj.location = (x, -z, -y)
+                            obj.data.transform(Matrix.Translation((-x, z, y)))
+
+                            obj["dgbanger_cg"] = [x, y, z] #custom property used for export
+                            break
+        except Exception as e:
+            print(f"Failed to read dgBangerData for {pkg_basename}: {e}")
+    else:
+        print(f"couldn't find path in \n{paths_to_check}")
 
 def load_pkg(
                 filepath,
@@ -470,7 +518,8 @@ def load_pkg(
                 import_headlights=True,
                 import_coordinate_offset=True,
                 batch_import_filter='NONE', 
-                xref_handling_mode='EMPTYS',
+                xref_handling='EMPTYS',
+                origin_placement='SKIP_UNRELATED',
                 is_batch_mode=False,
                 import_variants=True, 
                 is_xref_import=False,
@@ -556,7 +605,7 @@ def load_pkg(
             pkg_offset = helper.convert_vecspace_to_blender(offset_data)
             if pkg_version_id == 3 and file_length > 12: file.seek(file_length - 12, 1)
         elif file_name == "xrefs":
-            read_xrefs(file, root_ob, pkg_collection, xref_handling_mode, filepath, context)
+            read_xrefs(file, root_ob, pkg_collection, xref_handling, filepath, context)
         else:
             new_obj = read_geometry_file(file, file_name, root_ob, pkg_collection)
             if new_obj is not None: imported_objects.append((file_name, new_obj))
@@ -584,6 +633,15 @@ def load_pkg(
                         bpy.data.objects.remove(obj, do_unlink=True)
                         if mesh_data and isinstance(mesh_data, bpy.types.Mesh):
                             bpy.data.meshes.remove(mesh_data, do_unlink=True)
+
+    if origin_placement != 'NONE':
+        for original_name, obj in imported_objects:
+            # Check if the object was deleted by the LOD fallback step
+            try:
+                _ = obj.name
+                apply_dgbanger_data(original_name, obj, filepath, origin_placement)
+            except ReferenceError:
+                pass
 
     if import_bbnd:
         bbnd_path = extract_bbnd_file.find_bbnd(pkg_path)
@@ -614,7 +672,8 @@ def load(operator, context, filepath="", **kwargs):
             import_headlights=kwargs.get('import_headlights', True),
             import_coordinate_offset=kwargs.get('import_coordinate_offset', True),
             batch_import_filter=kwargs.get('batch_import_filter', 'NONE'),
-            xref_handling_mode=kwargs.get('xref_handling_mode', 'EMPTYS'),
+            xref_handling=kwargs.get('xref_handling', 'EMPTYS'),
+            origin_placement=kwargs.get('origin_placement', 'SKIP_UNRELATED'),
             import_variants=kwargs.get('import_variants', True),
             is_batch_mode=is_batch
             )

@@ -289,7 +289,7 @@ def export_shaders(file, context, type="byte", use_roughness_instead_of_specular
     file.write(struct.pack('L', shaders_file_length))
     file.seek(0, 2)
 
-def export_geometry(file, meshlist, options, export_headlights):
+def export_geometry(file, meshlist, options, export_headlights, export_origin_placement):
     collected_hlight_planes = [] #gets the headlight planes ready
     for obj in meshlist:
         
@@ -318,6 +318,13 @@ def export_geometry(file, meshlist, options, export_headlights):
             temp_mesh = eval_obj.to_mesh()
         else:
             temp_mesh = obj.to_mesh()
+            
+        # REVERSE dgBangerData Offset, if applicable
+        # Look for the custom property on the object, invert translation
+        if export_origin_placement != 'NONE' and "dgbanger_cg" in obj:
+            x, y, z = obj["dgbanger_cg"]
+            # Inverse of (-x, z, y) -> (x, -z, -y)
+            temp_mesh.transform(Matrix.Translation((x, -z, -y)))
     
         # get bmesh
         bm = bmesh.new()
@@ -511,6 +518,7 @@ def save_pkg(filepath,
              export_bbnd_file,
              use_roughness_instead_of_specular_one,
              export_headlights,
+             export_origin_placement,
              context):
     global pkg_path
     pkg_path = filepath
@@ -583,7 +591,7 @@ def save_pkg(filepath,
     # begin write pkg file
     file.write(bytes('PKG3', 'utf-8'))
     print('\t[%.4f] exporting mesh data' % (time.perf_counter() - time1))
-    export_geometry(file, reorder_objects(export_geomlist, export_pred), export_options, export_headlights)
+    export_geometry(file, reorder_objects(export_geomlist, export_pred), export_options, export_headlights, export_origin_placement)
     print('\t[%.4f] exporting shaders' % (time.perf_counter() - time1))
     export_shaders(file, context, export_shadertype, use_roughness_instead_of_specular_one)
     print('\t[%.4f] exporting xrefs' % (time.perf_counter() - time1))
@@ -607,6 +615,7 @@ def save(operator,
          export_bbnd_file=True,
          use_roughness_instead_of_specular_one=True,
          export_headlights=True,
+         export_origin_placement="SKIP_UNRELATED",
          ):
     
     # save PKG
@@ -618,6 +627,7 @@ def save(operator,
              export_bbnd_file,
              use_roughness_instead_of_specular_one,
              export_headlights,
+             export_origin_placement,
              context,
              )
 

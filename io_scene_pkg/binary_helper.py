@@ -47,13 +47,36 @@ def read_float2(file):
     return struct.unpack('<ff', file.read(8))
 
 
-def read_color4f(file):
-    return struct.unpack('<ffff', file.read(16))
+#colorspace conversion issue noticed by nawtrazu in mcsr Discord, thank you <3
+def srgb_to_linear(c):
+    if c <= 0.04045:
+        return c / 12.92
+    else:
+        return math.pow((c + 0.055) / 1.055, 2.4)
 
+def linear_to_srgb(c):
+    if c <= 0.0031308:
+        return c * 12.92
+    else:
+        return 1.055 * math.pow(c, 1 / 2.4) - 0.055
+
+def read_color4f(file):
+    c = struct.unpack('<ffff', file.read(16))
+    return [
+        srgb_to_linear(c[0]), 
+        srgb_to_linear(c[1]), 
+        srgb_to_linear(c[2]), 
+        c[3] # Alpha stays unchanged!
+    ]
 
 def read_color4d(file):
     c4d = struct.unpack('BBBB', file.read(4))
-    return [c4d[0]/255, c4d[1]/255, c4d[2]/255, c4d[3]/255]
+    return [
+        srgb_to_linear(c4d[0]/255.0), 
+        srgb_to_linear(c4d[1]/255.0), 
+        srgb_to_linear(c4d[2]/255.0), 
+        c4d[3]/255.0 # Alpha stays unchanged!
+    ]
 
 
 def read_matrix3x4(file):
@@ -123,16 +146,20 @@ def write_float3(file, data):
     file.write(struct.pack('<fff', data[0], data[1], data[2]))
 
     
-def write_color4d(file, color, alpha=1):
-    r = min(255, int(color[0] * 255))
-    g = min(255, int(color[1] * 255))
-    b = min(255, int(color[2] * 255))
-    a = min(255, int(alpha * 255))
+def write_color4d(file, color, alpha=1): # Convert Linear back to sRGB, clamp between 0.0 and 1.0, then multiply by 255
+    r = min(255, max(0, int(linear_to_srgb(color[0]) * 255)))
+    g = min(255, max(0, int(linear_to_srgb(color[1]) * 255)))
+    b = min(255, max(0, int(linear_to_srgb(color[2]) * 255)))
+    a = min(255, max(0, int(alpha * 255)))
     file.write(struct.pack('BBBB', r, g, b, a))
 
-
 def write_color4f(file, color, alpha=1):
-    file.write(struct.pack('<ffff', color[0], color[1], color[2], alpha))
+    file.write(struct.pack('<ffff', 
+        linear_to_srgb(color[0]), 
+        linear_to_srgb(color[1]), 
+        linear_to_srgb(color[2]), 
+        alpha
+    ))
 
 
 def write_file_header(file, name, length=0):

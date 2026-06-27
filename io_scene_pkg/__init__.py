@@ -9,7 +9,7 @@ bl_info = {
     "version": (1, 0, 4),
     "blender": (5, 1, 0),
     "location": "File > Import-Export",
-    "description": "Import-Export PKG files",
+    "description": "Import-Export AngelStudios' Proprietary files",
     "warning": "",
     "doc_url": "https://github.com/Dummiesman/PKGImportExport/",
     "tracker_url": "https://github.com/Dummiesman/PKGImportExport/",
@@ -23,7 +23,7 @@ import json #for saved export/import settings :)
 import os
 from bpy.props import StringProperty, BoolProperty, CollectionProperty
 
-CONFIG_FILE = os.path.join(os.path.dirname(__file__), "pkg_addon_settings.json")
+CONFIG_FILE = os.path.join(os.path.dirname(__file__), "addon_settings.json")
 
 def load_settings():
     """Load settings from JSON file, return empty dict if it fails/doesn't exist."""

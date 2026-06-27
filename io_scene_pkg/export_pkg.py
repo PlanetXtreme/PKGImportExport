@@ -157,11 +157,6 @@ dne_list = ["BOUND", "BINARY_BOUND",
 # related/essential enough that we load them in for user editing.
 misc_mtx_objects = ["EXHAUST0", "EXHAUST1"]#, "HLIGHT_L", "HLIGHT0_L", "HLIGHT1_L"] --HLIGHTs not used in MCSR, custom code for frontend lights (2X)
 
-######################################################
-# EXPORT HELPERS
-######################################################
-
-
 
 def unknown_objects_comparison(item1, item2):
     name1 = helper.get_raw_object_name(item1.name)
@@ -322,11 +317,9 @@ def export_geometry(file, meshlist, options, export_headlights, export_origin_pl
         # REVERSE dgBangerData Offset, if applicable
         # Look for the custom property on the object, invert translation
         if export_origin_placement != 'NONE' and "dgbanger_cg" in obj:
-            x, y, z = obj["dgbanger_cg"]
-            # Inverse of (-x, z, y) -> (x, -z, -y)
-            temp_mesh.transform(Matrix.Translation((x, -z, -y)))
-    
-        # get bmesh
+            cg_blender = helper.convert_vecspace_to_blender(obj["dgbanger_cg"])
+            temp_mesh.transform(Matrix.Translation(Vector(cg_blender) * -1))
+
         bm = bmesh.new()
         bm.from_mesh(temp_mesh)
         bm_tris = bm.calc_loop_triangles()
@@ -399,9 +392,9 @@ def export_geometry(file, meshlist, options, export_headlights, export_origin_pl
             for cv in range(len(cmtl_verts)):
                 export_vert = cmtl_verts[cv]
                 export_vert_location = ((obj.matrix_world @ export_vert.co) - obj.location) if premultiply_vertices else export_vert.co
-                bin.write_float3(file, helper.convert_vecspace_to_mm2(export_vert_location))
+                bin.write_float3(file, helper.convert_vecspace_to_game(export_vert_location))
                 if FVF_FLAGS.has_flag("D3DFVF_NORMAL"):
-                    bin.write_float3(file, helper.convert_vecspace_to_mm2(export_vert.normal))
+                    bin.write_float3(file, helper.convert_vecspace_to_game(export_vert.normal))
                 if FVF_FLAGS.has_flag("D3DFVF_DIFFUSE"):
                     bin.write_color4d(file, cmtl_cols[cv])
                 if FVF_FLAGS.has_flag("D3DFVF_SPECULAR"):
@@ -445,7 +438,7 @@ def export_hlight_mtx(planes, pkg_path):
 
     for i, verts in enumerate(planes):
         # Convert to game space (X, Z, Y)
-        game_corners = [Vector((v.x, v.z, v.y)) for v in verts]
+        game_corners = [Vector(helper.convert_vecspace_to_game(v)) for v in verts]
 
         min_x = min(c.x for c in game_corners)
         max_x = max(c.x for c in game_corners)
@@ -569,20 +562,17 @@ def save_pkg(filepath,
 
     print('\tPKG autodetected export type: ' + export_typestr)
     
-    # next we need to prepare our material list
+    #prepped mat list
     global material_remap_table
     material_remap_table = export_helper.create_material_remap(apply_modifiers)
     
-    # finally we need to prepare our geometry list
+    #prepped geo list
     export_geomlist = []
     for obj in export_objects:
         clean_upper_name = helper.get_clean_name(obj.name).upper()
         if (obj.type == 'MESH' and not obj.name.upper() in dne_list):
             export_geomlist.append(obj)
 
-    # TODO: What do we do here now??
-    # special case for dashboards, if no variants are specified, it crashes
-    # so we'll make defaults here
     #variants = paintjobs
     #if export_typestr == 'dash':
     #  if not "|" in paintjobs or not "," in paintjobs or not paintjobs.strip():

@@ -17,7 +17,7 @@ def natural_sort_key(s):
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
 
 def is_ignored_bone(name):
-    """Rule 0: Ignore bones with specific keywords"""
+    """Ignore bones with specific keywords"""
     return bool(re.search(r'PLACEMENT|IGNORE', name.upper()))
 
 def get_valid_bone_order(arm_obj):
@@ -82,7 +82,7 @@ def read_age_engine_animation(filepath):
     return anim_data
 
 def apply_animations_to_rig(filepaths, arm_obj):
-    """Applies a list of animations sequentially to the same rig."""
+    """Applies a list of animations sequentially to the same rig"""
     BONE_ORDER = get_valid_bone_order(arm_obj)
     
     if bpy.context.object and bpy.context.object.mode != 'OBJECT':
@@ -131,7 +131,7 @@ def apply_animations_to_rig(filepaths, arm_obj):
                 pose_bones[b_idx].rotation_euler = Euler((-rx, -ry, rz), 'XYZ')
                 pose_bones[b_idx].keyframe_insert(data_path="rotation_euler", frame=blender_frame)
         
-        # Rule 1: 2 blocks of empty, unanimated space in between sequential animations
+        # 2 blocks of empty, unanimated space in between sequential animations is nice
         current_frame += len(anim_data['frames']) + 2
 
     bpy.ops.object.mode_set(mode='OBJECT')
@@ -149,7 +149,7 @@ def runs(operator, context, filepaths):
     num_rigs = len(selected_rigs)
     num_anims = len(filepaths)
 
-    # Force framerate to 30
+    # Framerate @ 30 matches the playback speed in-game, regardless of what the file header says the framerate of the imported/exported animation is
     bpy.context.scene.render.fps = 30
 
     if num_rigs == 1:

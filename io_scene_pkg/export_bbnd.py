@@ -10,12 +10,10 @@
 import bpy
 import struct
 import os
-import math
-from mathutils import Matrix
+import pkgimporter.common_helpers as helper
 
 def save(operator, context):
     filepath = operator.filepath
-    FIX_COORDINATE_ROTATION = True
 
     if bpy.context.mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
@@ -37,15 +35,14 @@ def save(operator, context):
     header += struct.pack('<I', new_num_faces)   
 
     export_mat = obj.matrix_world
-    if FIX_COORDINATE_ROTATION:
-        rot_z_inv = Matrix.Rotation(math.radians(-180.0), 4, 'Z')
-        rot_x_inv = Matrix.Rotation(math.radians(-90.0), 4, 'X')
-        export_mat = rot_x_inv @ rot_z_inv @ export_mat
 
     verts_data = bytearray()
     for v in mesh.vertices:
-        final_co = export_mat @ v.co
-        verts_data += struct.pack('<fff', final_co.x, final_co.y, final_co.z)
+        # Get global world coordinates
+        world_co = export_mat @ v.co
+        # Convert directly to game coordinate space
+        game_co = helper.convert_vecspace_to_mm2(world_co)
+        verts_data += struct.pack('<fff', game_co[0], game_co[1], game_co[2])
 
     mat_data = bytearray()
     for i in range(new_num_groups):

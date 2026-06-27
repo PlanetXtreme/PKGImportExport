@@ -17,8 +17,7 @@ bl_info = {
     "category": "Import-Export"}
 
 import bpy
-import pkgimporter.variant_ui as variant_ui
-import pkgimporter.import_tex as import_tex
+import pkgimporter.quick_export_tool as export_tool
 import pkgimporter.material_helper_ui as material_helper_ui
 import json #for saved export/import settings :)
 import os
@@ -131,11 +130,103 @@ class ImportPSDL(bpy.types.Operator, ImportHelper):
 
         return {'FINISHED'}
 
+class ImportINST(bpy.types.Operator, ImportHelper):
+    """ Import Inst File Format (xrefs) """
+    bl_idname = "import_scene.inst"
+    bl_label = 'Import INST'
+    bl_options = {'UNDO'}
+    filename_ext = ".inst"
+    filter_glob: StringProperty(default="*.inst", options={'HIDDEN'})
+
+    files: CollectionProperty(
+        name="File Path",
+        type=bpy.types.OperatorFileListElement,
+    )
+    directory: StringProperty(
+        subtype='DIR_PATH',
+    )
+
+    import_coordinate_offset: BoolProperty(
+        name="Apply Files' Coordinate offset",
+        description="All MCSR pkg files have a file footer that describes the coordinates of the pkg in MCSR world space; Place object at those coordinates in Blender space?",
+        default=user_settings.get("import_inst_coordinate_offset", True),
+        )    
+
+    xref_handling: EnumProperty(
+        name="Child xrefs",
+        description="How are xrefs handled during import    ",
+        items=[
+            ('EMPTYS', "Emptys", "Creates Blender Emptys @ listed rot + pos, best for fast-viewport performance."),
+            ('INSTANCED', "Instanced Geometry", "Attempts to replace each xref object with an instance for performance + visibility."),
+            ('GEOMETRY', "Raw Geometry", "Attempts to replace each xref object with raw geometry - Expect poorest viewport performance."),
+        ],
+        default=user_settings.get("import_inst_xref_handling", 'INSTANCED'),
+    )
+
+    origin_placement: EnumProperty(
+        name="Origin Placement",
+        description="Apply dgBangerData Center of Gravity    ",
+        items=[
+            ('NONE', 
+             "Ignore dgBangerData", 
+             "Don't attempt to find dgBangerData origin for positioning elements"),
+            
+            ('SKIP_UNRELATED', 
+             "Skip vp_ + mtx", 
+             "Skips applying pre-calculated origin to objects which probably shouldn't use it (vp_vehicles, files with mtx pair)."),
+            
+            ('APPLY', 
+             "Apply to all", 
+             "Applies dgBangerData origin calculation to all objects which have dgBangerData filename pair."),
+        ],
+        default=user_settings.get("import_inst_origin_placement", 'SKIP_UNRELATED'),
+    )
+
+
+    def invoke(self, context, event): #memorization call
+        settings = load_settings()
+        inst_path = settings.get("path_i_inst", "")
+
+        if inst_path and os.path.exists(inst_path):
+            # Blender requires directories to end with a slash. WHY
+            if not inst_path.endswith(os.sep) and not inst_path.endswith(("/", "\\")):
+                inst_path += os.sep
+            
+            self.filepath = inst_path
+
+        return super().invoke(context, event)
+
+    def execute(self, context):
+        save_settings({
+            "import_inst_coordinate_offset": self.import_coordinate_offset,
+            "import_inst_xref_handling": self.xref_handling,
+            "import_inst_origin_placement": self.origin_placement,
+            "path_i_inst": self.directory,
+        })
+
+        from . import import_inst
+        keywords = self.as_keywords(ignore=("axis_forward",
+                                            "axis_up",
+                                            "filter_glob",
+                                            "check_existing",
+                                            "filepath",
+                                            "files",
+                                            "directory"
+                                            ))
+        if self.files:
+            for file_elem in self.files:
+                full_filepath = os.path.join(self.directory, file_elem.name)
+
+                import_inst.runs(self, context, filepath=full_filepath, **keywords)
+
+        else: #shouldn't reach here??
+            import_inst.runs(self, context, filepath=self.filepath, is_batch_mode=False, **keywords)
+
+        return {'FINISHED'}
+
 #class ImportBAI
 
 #class ImportCVPS
-
-#class ImportINST (probably road instances like trafflic lights on the PSDL)
 
 class ImportPKG(bpy.types.Operator, ImportHelper):
     """ Import PKG File Format (MCSR and Midtown Madness) """
@@ -601,6 +692,64 @@ class ImportANIM(bpy.types.Operator, ImportHelper):
 
 #class ExportPSDL
 
+class ExportINST(bpy.types.Operator, ExportHelper):
+    """ Export Inst File (xrefs) """
+    bl_idname = "export_scene.inst"
+    bl_label = 'Export INST'
+    bl_options = {'UNDO'}
+    filename_ext = ".inst"
+    filter_glob: StringProperty(default="*.inst", options={'HIDDEN'})
+
+    force_long_format: BoolProperty(
+        name="Force Long Format",
+        description="Forces all objects to export as a 12-float Matrix. Disable for optimization.",
+        default=False,
+    )
+
+    custom_prop_name: BoolProperty(
+        name="Use Custom Property Name",
+        description="Use custom property name for xref pkg name? Else uses empty/instance/geo name [truncating .001, .002...] for reference in exported .inst",
+        default=False,
+    )
+    def invoke(self, context, event):
+        # Load the saved export directory
+        settings = load_settings()
+        inst_export_path = settings.get("path_e_inst", "")
+
+        if inst_export_path and os.path.exists(inst_export_path):
+            if not inst_export_path.endswith(os.sep) and not inst_export_path.endswith(("/", "\\")):
+                inst_export_path += os.sep
+            
+            # ExportHelper uses filepath for both directory and the file name
+            self.filepath = inst_export_path
+
+        return super().invoke(context, event)
+
+    def draw(self, context):
+        layout = self.layout
+        box = layout.box()
+        box.label(text="Reminder:", icon='INFO')
+        box.label(text="Only ACTIVELY SELECTED")
+        box.label(text="objects will be exported!")
+
+        layout.separator()
+        
+        layout.prop(self, "force_long_format")
+        layout.prop(self, "custom_prop_name")
+
+    def execute(self, context):
+        save_settings({
+            "export_inst_long_format": self.force_long_format,
+            "export_inst_name": self.custom_prop_name,
+            "path_e_inst": os.path.dirname(self.filepath),
+        })
+
+        from . import export_inst
+        keywords = self.as_keywords(ignore=("filter_glob", "check_existing", "filepath"))
+        
+        return export_inst.runs(self, context, filepath=self.filepath, **keywords)
+
+
 #class ExportBAI
 
 #class ExportCVPS
@@ -789,7 +938,7 @@ class ExportANIM(bpy.types.Operator, ExportHelper):
 
 
 #Not implemented, may not have read-data
-class ImportINST(bpy.types.Operator, ImportHelper):
+class ImportINST_STOP(bpy.types.Operator, ImportHelper):
     bl_idname = "import_scene.inst"
     bl_label = 'Import .Inst'
     bl_options = {'UNDO'}
@@ -802,7 +951,7 @@ class ImportINST(bpy.types.Operator, ImportHelper):
 
         return import_inst.runs(self.filepath, context)
 
-class ExportINST(bpy.types.Operator, ImportHelper):
+class ExportINST_STOP(bpy.types.Operator, ImportHelper):
     bl_idname = "export_scene.inst"
     bl_label = 'Export .inst'
     bl_options = {'UNDO'}
@@ -819,26 +968,26 @@ class ExportINST(bpy.types.Operator, ImportHelper):
 
 # Adds to menu
 def menu_func_import(self, context):
-    self.layout.operator(ImportPSDL.bl_idname,    text="Angel Studios psdl                (.psdl)")
-    #self.layout.operator(ImportPSDL.bl_idname,    text="Angel Studios BoundaryAI  (.bai)")
-    #self.layout.operator(ImportPSDL.bl_idname,    text="Angel Studios cvps          (.cvps)")
-    #self.layout.operator(ImportINSTANCES.bl_idname,    text="Angel Studios Instances (.inst)")
-    self.layout.operator(ImportPKG.bl_idname,     text="Angel Studios ModPackage  (.pkg)")
-    self.layout.operator(ImportBBND.bl_idname,    text="Angel Studios BoxBoundary (.bbnd)")
-    self.layout.operator(ImportMODSKEL.bl_idname, text="Angel Studios Model             (.mod, .skel)")
-    self.layout.operator(ImportANIM.bl_idname,    text="Angel Studios Animation       (.anim)")
-    #self.layout.operator(ImportINST.bl_idname, text="Angel Studios sp_stop_f   (.inst)")
+    self.layout.operator(ImportPSDL.bl_idname,      text="AngelStudios psdl                 (.psdl)")
+    self.layout.operator(ImportINST.bl_idname,      text="AngelStudios Instances       (.inst)")
+    #self.layout.operator(ExportBAI.bl_idname,       text="AngelStudios BoundaryAI  (.bai)")
+    #self.layout.operator(ExportCVPS.bl_idname,      text="AngelStudios cvps          (.cvps)")
+    self.layout.operator(ImportPKG.bl_idname,       text="AngelStudios ModPackage  (.pkg)")
+    self.layout.operator(ImportBBND.bl_idname,      text="AngelStudios BoxBoundary (.bbnd)")
+    self.layout.operator(ImportMODSKEL.bl_idname,   text="AngelStudios Model              (.mod, .skel, .rays)")
+    self.layout.operator(ImportANIM.bl_idname,      text="AngelStudios Animation        (.anim)")
+    #self.layout.operator(ImportINST_SLOW.bl_idname, text="AngelStudios sp_stop_f   (.inst)")
 
 def menu_func_export(self, context):
-    #self.layout.operator(ExportPSDL.bl_idname,    text="Angel Studios psdl                (.psdl)")
-    #self.layout.operator(ExportPSDL.bl_idname,    text="Angel Studios BoundaryAI  (.bai)")
-    #self.layout.operator(ExportPSDL.bl_idname,    text="Angel Studios cvps          (.cvps)")
-    #self.layout.operator(ExportINSTANCES.bl_idname,    text="Angel Studios Instances (.inst)")
-    self.layout.operator(ExportPKG.bl_idname,  text="Angel Studios ModPackage  (.pkg)")
-    self.layout.operator(ExportBBND.bl_idname, text="Angel Studios BoxBoundary (.bbnd)")
-    #self.layout.operator(ExportMODSKEL.bl_idname, text="Angel Studios Model             (.mod, .skel)")
-    self.layout.operator(ExportANIM.bl_idname, text="Angel Studios Animation       (.anim)")
-    #self.layout.operator(ExportINST.bl_idname, text="Angel Studios sp_stop_f   (.inst)")
+    #self.layout.operator(ExportPSDL.bl_idname,      text="AngelStudios psdl                 (.psdl)")
+    self.layout.operator(ExportINST.bl_idname,      text="AngelStudios Instances       (.inst)")
+    #self.layout.operator(ExportBAI.bl_idname,       text="AngelStudios BoundaryAI  (.bai)")
+    #self.layout.operator(ExportCVPS.bl_idname,      text="AngelStudios cvps          (.cvps)")
+    self.layout.operator(ExportPKG.bl_idname,       text="AngelStudios ModPackage  (.pkg)")
+    self.layout.operator(ExportBBND.bl_idname,      text="AngelStudios BoxBoundary (.bbnd)")
+    #self.layout.operator(ExportMODSKEL.bl_idname,   text="AngelStudios Model              (.mod, .skel, .rays)")
+    self.layout.operator(ExportANIM.bl_idname,      text="AngelStudios Animation        (.anim)")
+    #self.layout.operator(ExportINST_SLOW.bl_idname, text="AngelStudios sp_stop_f   (.inst)")
 
 
 # Register factories
@@ -846,9 +995,9 @@ classes = ( #this is the best hierarchy: PSDL, PKG, BBND, ModSkel, Anim, ...
             #Should look into exporting the selected material as a .Tex or .TGA file
             #.Tex has best functionality (ability for emission masks, alpha masks, + color masks)
     ImportPSDL,
+    ImportINST, #<-- big inst file, not small one. 
     #ImportBAI,
     #ImportCVPS,
-    #ImportINST, <-- big inst file, not small one. Looks super easy to reverse-engineer
     ImportPKG,
     ImportBBND,
     ImportMODSKEL,
@@ -856,23 +1005,22 @@ classes = ( #this is the best hierarchy: PSDL, PKG, BBND, ModSkel, Anim, ...
     ImportANIM,
     
     #ExportPSDL,
+    ExportINST, 
     #ExportBAI,
     #ExportCVPS,
-    #ExportINST, 
     ExportPKG,
     ExportBBND,
     #ExportMODSKEL, #exports 2 files with same name as each other (.skel + .mod)
     ExportANIM,
 
-    #ImportINST, <-- small inst file (useless?)
-    #ExportINST, <-- small inst file (useless?)
+    #ImportINST_SLOW, #<-- small inst file (may be related to AI stopping at corners, but may also be useless)
+    #ExportINST_SLOW, #<-- small inst file (may be related to AI stopping at corners, but may also be useless)
 )
 
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
-    variant_ui.register()
-    import_tex.register()
+    export_tool.register()
     material_helper_ui.register()
     
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
@@ -890,8 +1038,7 @@ def unregister():
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)
 
     material_helper_ui.unregister()
-    import_tex.unregister()
-    variant_ui.unregister()
+    export_tool.unregister()
     
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
@@ -968,6 +1115,7 @@ if __name__ == "__main__":
 #    .anim     (animation file, requires .mod/.skel to work)
 #/city
 #    .inst (low-end) [might be rules for braking in corners for AI]
+#    .inst    (Loads references to pkg files in the city, populates the city buildings + boundaries. Not required to load city)
 #    .
 #/audvag
 #    .VAG (audio, looped)
@@ -983,20 +1131,22 @@ if __name__ == "__main__":
 
 #          NEEDS JAILBREAK
 #          NEEDS JAILBREAK
-#/bound
-#    .ter     (originally used to build bbnd files - but it's leftover dev data that is worthless!)
-#/city   
 #    .bai     (boundary AI - Tells AI where it can drive. Required for CTF to load, tells AI where to drive in races too)
 #              This file also describes all 'street furniture' + traffic/pedestrian paths.
 #              It probably draws splines related to where stuff needs to spawn.
-#    .inst    (Loads references to pkg files in the city, populates the city buildings + boundaries. Not required to load city)
-#    .cpvs    (When removed, lost functionality was not clear. Unsure what this file does)
 #    .psdl    (map file - Required to load city. Contains all roads + road decals, some land pieces,
 #              and describes textures, sidewalks, tunnels, various boundaries.
-#/city/m01 /city/l01
-#    .pathset (props, decals) [are likely leftover dev data blocks]
 #/fonts
 #    .strtbl  (in-sim textual content [AKA 'non-htm' text: Cutscenes, "next race", etc])
 #    .fonttex (probably describes how the image file = characters, grid-based)
+
+#           WORTHLESS
+#           WORTHLESS
+#/bound
+#    .ter     (originally used to build bbnd files - but it's leftover dev data that is worthless!)
+#/city   
+#    .cpvs    (When removed, lost functionality was not clear. Unsure what this file does)
+#/city/m01 /city/l01
+#    .pathset (props, decals) [are likely leftover dev data blocks]
 #/race/l01 /race/m01
 #    .short   (Leftover dev data, unnecessary)

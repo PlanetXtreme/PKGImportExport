@@ -162,6 +162,6 @@ def is_matrix_object(obj):
 
 def convert_vecspace_to_blender(vtx):
     return (vtx[0] * -1, vtx[2], vtx[1])
-    
-def convert_vecspace_to_mm2(vtx):
+
+def convert_vecspace_to_game(vtx):
     return (vtx[0] * -1, vtx[2], vtx[1])

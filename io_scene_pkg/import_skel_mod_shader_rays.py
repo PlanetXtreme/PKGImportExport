@@ -15,13 +15,11 @@ import struct
 import math
 from mathutils import Vector, Matrix
 
-from . import common_helpers
+import pkgimporter.common_helpers as helper
 from . import import_helper
 from . import binary_helper
 from .shader_set import ShaderSet, Shader
 
-def convert_axis(x, y, z):
-    return common_helpers.convert_vecspace_to_blender((x, y, z))
 
 def standardize_face(v0, v1, v2):
     if v0 < v1 and v0 < v2: return (v0, v1, v2)
@@ -141,7 +139,7 @@ def runs(context, mod_path, skel_path, operator):
                 stack.pop()
                 i += 1
             elif tokens[i] == 'offset':
-                ox, oy, oz = convert_axis(float(tokens[i+1]), float(tokens[i+2]), float(tokens[i+3]))
+                ox, oy, oz = helper.convert_vecspace_to_blender(float(tokens[i+1]), float(tokens[i+2]), float(tokens[i+3]))
                 if bones[-1]['parent'] != -1:
                     px, py, pz = bones[bones[-1]['parent']]['global_pos']
                     bones[-1]['global_pos'] = (px + ox, py + oy, pz + oz)
@@ -280,9 +278,9 @@ def runs(context, mod_path, skel_path, operator):
         cmd = parts[0]
 
         if cmd == 'v': 
-            verts.append(convert_axis(float(parts[1]), float(parts[2]), float(parts[3])))
+            verts.append(helper.convert_vecspace_to_blender(float(parts[1]), float(parts[2]), float(parts[3])))
         elif cmd == 'n': 
-            raw_n = convert_axis(float(parts[1]), float(parts[2]), float(parts[3]))
+            raw_n = helper.convert_vecspace_to_blender(float(parts[1]), float(parts[2]), float(parts[3]))
             normals.append(safe_vector(raw_n))
         elif cmd == 't1': 
             uvs.append((float(parts[1]), 1.0 - float(parts[2])))

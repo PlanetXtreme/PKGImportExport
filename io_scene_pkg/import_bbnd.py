@@ -10,13 +10,11 @@
 import bpy
 import struct
 import os
-import math
-from mathutils import Matrix
 from pathlib import Path
+import pkgimporter.common_helpers as helper
+
 
 def runs(operator, context, root_parent_obj=None, target_collection=None):
-    FIX_COORDINATE_ROTATION = True
-
     filepath = operator.filepath if hasattr(operator, "filepath") else str(operator)
     if not filepath or not os.path.exists(filepath):
         print({'ERROR'}, f"Cannot find file at {filepath}")
@@ -36,7 +34,9 @@ def runs(operator, context, root_parent_obj=None, target_collection=None):
     offset = 13
     verts = []
     for _ in range(num_verts):
-        verts.append(struct.unpack('<fff', data[offset:offset+12]))
+        raw_vtx = struct.unpack('<fff', data[offset:offset+12])
+        # Convert coordinate space immediately as we read the vertices
+        verts.append(helper.convert_vecspace_to_blender(raw_vtx))
         offset += 12
 
     mat_chunks = []
@@ -67,17 +67,16 @@ def runs(operator, context, root_parent_obj=None, target_collection=None):
     mesh.from_pydata(verts, [], faces)
     mesh.update()
 
-    # Create Materials & Assign Custom Properties
     for i in range(num_groups):
         chunk = mat_chunks[i]
         
-        # Extract name string from the binary
+        # Extract name string
         engine_name = chunk[0:32].split(b'\0')[0].decode('ascii', errors='ignore').strip()
         blender_name = engine_name if engine_name else f"{mesh_name}_Mat_{i}"
         
         mat = bpy.data.materials.new(name=blender_name)
         
-        # Assign Custom Properties! 
+        # Assign custom properties
         mat["bbnd_material_name"] = engine_name if engine_name else "default"
         mat["bbnd_float1"] = struct.unpack('<f', chunk[32:36])[0]
         mat["bbnd_float2"] = struct.unpack('<f', chunk[36:40])[0]
@@ -89,20 +88,14 @@ def runs(operator, context, root_parent_obj=None, target_collection=None):
     for i, poly in enumerate(mesh.polygons):
         poly.material_index = mat_indices[i]
 
-    if FIX_COORDINATE_ROTATION:
-        obj.matrix_world = Matrix.Rotation(math.radians(90.0), 4, 'X') @ obj.matrix_world
-        obj.matrix_world = Matrix.Rotation(math.radians(180.0), 4, 'Z') @ obj.matrix_world
-
-    bpy.context.view_layer.objects.active = obj
-    obj.select_set(True)
-    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    #bpy.context.view_layer.objects.active = obj
+    #obj.select_set(True)
 
     if root_parent_obj:
         obj.parent = root_parent_obj
 
     print({'INFO'}, f"Successfully imported BBND: {mesh_name}")
     return {'FINISHED'}
-
 
 def find_bbnd(pkg_path):
     pkg_path = Path(bpy.path.abspath(str(pkg_path)))

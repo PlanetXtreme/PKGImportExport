@@ -11,6 +11,7 @@ import bpy
 import bmesh
 import struct
 import os
+import pkgimporter.common_helpers as helper
 
 # --- CONSTANTS ---
 ATB_ROAD = 0x0
@@ -50,10 +51,13 @@ def runs(operator, context, filepath="", **kwargs):
         # 1. READ VERTICES
         n_verts = struct.unpack('<I', f.read(4))[0]
         for _ in range(n_verts):
-            x, y, z = struct.unpack('<fff', f.read(12))
-            psdl['vertices'].append((x, -z, y)) # Convert Y-Up to Z-Up
+            raw_vtx = struct.unpack('<fff', f.read(12))
+            # Send the game's X, Y, Z directly through our universal helper
+            psdl['vertices'].append(helper.convert_vecspace_to_blender(raw_vtx))
             
         # 2. READ HEIGHTS
+        # (Heights don't need conversion, they are purely scalar game-Y (Up) values 
+        # which will be directly mapped to Blender-Z (Up) during geometry generation!)
         n_heights = struct.unpack('<I', f.read(4))[0]
         for _ in range(n_heights):
             h = struct.unpack('<f', f.read(4))[0]
@@ -271,4 +275,3 @@ def build_blender_geometry(psdl):
                 mesh.update()
                 if temp_material:
                     obj.data.materials.append(temp_material)
-    

@@ -56,7 +56,7 @@ def create_shader_from_material(mat, use_roughness_instead_of_specular_one):
             if color_input_node.image is not None:
                 shader.name = helper.get_undupe_name(color_input_node.image.name)
         else:
-            print("Unsupported diffuse link type. Using default value for diffuse_color.")
+            print("Unsupported Diffuse_Color -> Base Color link type. Using default value for diffuse_color (Reset your material!).")
     else:
         shader.diffuse_color = [diffuse_input.default_value[0], diffuse_input.default_value[1], diffuse_input.default_value[2], 1.0]
     
@@ -86,7 +86,7 @@ def create_shader_from_material(mat, use_roughness_instead_of_specular_one):
                     if len(inp.links) == 0 and inp.name != "Factor":
                         shader.emissive_color = [inp.default_value[0], inp.default_value[1], inp.default_value[2], 1.0]
             else:
-                print("Unsupported diffuse link type. Using default value for diffuse_color.")
+                print("Unsupported Diffuse_Color -> Base Color link type. Using default value for diffuse_color (Reset your material!)")
         else:
             shader.emissive_color = [emission_input.default_value[0], emission_input.default_value[1], emission_input.default_value[2], 1.0]
         
@@ -145,8 +145,7 @@ def get_used_materials(ob, modifiers):
     
     return used_materials
 
-
-###fixed the below func to use materials on selected objects only
+###Uses materials on selected objects only
 def create_material_remap(modifiers):
     all_used_mats = []
     
@@ -190,15 +189,13 @@ def bounds(obj):
     o_details = collections.namedtuple('object_details', 'x y z')
     return o_details(**originals)
 
-
 def write_matrix_standard(object, file):
     bnds = bounds(object)
-    file.write(struct.pack('fff', *helper.convert_vecspace_to_mm2((bnds.x.min * -1, bnds.y.min, bnds.z.min)))) # have to do * -1 for some reason
-    file.write(struct.pack('fff', *helper.convert_vecspace_to_mm2((bnds.x.max * -1, bnds.y.max, bnds.z.max)))) # have to do * -1 for some reason
-    file.write(struct.pack('fff', *helper.convert_vecspace_to_mm2(object.location))) # write this twice. one is pivot and one is origin
-    file.write(struct.pack('fff', *helper.convert_vecspace_to_mm2(object.location)))
+    file.write(struct.pack('fff', *helper.convert_vecspace_to_game((bnds.x.min * -1, bnds.y.min, bnds.z.min)))) # have to do * -1 for some reason
+    file.write(struct.pack('fff', *helper.convert_vecspace_to_game((bnds.x.max * -1, bnds.y.max, bnds.z.max)))) # have to do * -1 for some reason
+    file.write(struct.pack('fff', *helper.convert_vecspace_to_game(object.location))) # write this twice. one is pivot and one is origin
+    file.write(struct.pack('fff', *helper.convert_vecspace_to_game(object.location)))
 
-                                           
 def write_matrix(meshname, object, pkg_path):
     """write a *.mtx file"""
     mesh_name_parsed = helper.get_clean_name(helper.get_raw_object_name(meshname))
@@ -213,7 +210,6 @@ def write_matrix(meshname, object, pkg_path):
 
     mtxfile.close()
     return
-
     
 def prepare_mesh_data(mesh, material_index, tessface):
   """build mesh data for a PKG file"""

@@ -8,7 +8,8 @@ Requirements
   Download + Install Blender 5.0+ (tested in 5.1)
   Download io_scene_pkg as zip
   Either:
-    unzip file and place in AppData\Roaming\Blender Foundation\Blender\5.1\scripts\addons\pkgimporter
+    Unzip file and place all content in a folder @ AppData\Roaming\Blender Foundation\Blender\5.1\scripts\addons
+    AKA, AppData\Roaming\Blender Foundation\Blender\5.1\scripts\addons\AngelStudios_FileEditor\__init__.py should be the directory of one of the files.
   or:
     install zip file via Blender -> Edit -> Preferences -> Add-ons -> Install from Disk... -> select zip
 
